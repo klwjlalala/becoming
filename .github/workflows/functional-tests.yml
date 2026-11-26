@@ -1,0 +1,25 @@
+name: Functional tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  functional:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run deterministic functional tests
+        run: python -m unittest discover -s tests -v
+      - name: Validate effect evaluation scaffold (offline)
+        run: python -m evaluation
