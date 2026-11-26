@@ -359,13 +359,16 @@ def parse_proposal(raw: str, turns: list[dict], claims: list[Claim],
 
 class PersonalUnderstanding:
     """SQLite-backed personal understanding sharing the transcript connection."""
-    def __init__(self, store: SQLiteConversationStore, model: Model):
+    def __init__(
+        self, store: SQLiteConversationStore, model: Model, *,
+        recover_running_jobs: bool = True,
+    ):
         self.store, self.model, self.db = store, model, store.connection
         self.last_search = None
         self.last_event = UnderstandingEvent()
-        self._ensure_schema()
+        self._ensure_schema(recover_running_jobs=recover_running_jobs)
 
-    def _ensure_schema(self):
+    def _ensure_schema(self, *, recover_running_jobs: bool = True):
         with self.db:
             self.db.executescript("""
                 CREATE TABLE IF NOT EXISTS understanding_evidence (
@@ -561,12 +564,15 @@ class PersonalUnderstanding:
                 END;
             """)
 
-        # Recover jobs interrupted while the single-process prototype was running.
-        with self.db:
-            self.db.execute("""
-                UPDATE understanding_jobs SET status='pending',updated_at=?
-                WHERE status='running'
-            """, (_now(),))
+        # Only the process-level worker should recover interrupted jobs.
+        # API read/agent managers are constructed per conversation and must not
+        # reset a task that another thread is currently processing.
+        if recover_running_jobs:
+            with self.db:
+                self.db.execute("""
+                    UPDATE understanding_jobs SET status='pending',updated_at=?
+                    WHERE status='running'
+                """, (_now(),))
 
     @staticmethod
     def is_urgent(text: str) -> bool:
