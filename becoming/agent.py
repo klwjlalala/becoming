@@ -80,9 +80,12 @@ class Agent:
             if self.personal_understanding is not None:
                 priority = 10 if PersonalUnderstanding.is_urgent(text) else 0
                 job_specs.append(("personal_understanding.process", priority))
-        turn_id = self.store.append_turn(
-            text, reply, background_jobs=tuple(job_specs)
-        )
+        if defer_post_turn:
+            turn_id = self.store.append_turn(
+                text, reply, background_jobs=tuple(job_specs)
+            )
+        else:
+            turn_id = self.store.append_turn(text, reply)
         written = ()
         confirmed = ()
         understanding_written = ()
