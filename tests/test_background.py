@@ -7,7 +7,9 @@ from pathlib import Path
 
 from becoming.background import BackgroundWorker
 from becoming.memory import SQLiteConversationStore
+from becoming.long_memory import LongMemory
 from becoming.models import ModelError
+from becoming.personal_understanding import PersonalUnderstanding
 
 
 class EmptyModel:
@@ -96,6 +98,83 @@ class BackgroundWorkerTests(unittest.TestCase):
                 ).fetchone()[0],
                 1,
             )
+        finally:
+            worker.stop()
+
+    def test_exhausted_interrupted_job_becomes_failed_after_restart(self):
+        store = SQLiteConversationStore(self.db_path)
+        turn_id = store.append_turn(
+            "这条任务在第三次尝试时中断。", "明白。",
+            background_jobs=(("long_memory.extract", 0),),
+        )
+        store.connection.execute(
+            "UPDATE background_jobs SET status='running',attempts=3 WHERE source_turn_id=?",
+            (turn_id,),
+        )
+        store.connection.commit()
+        store.close()
+
+        worker = BackgroundWorker(
+            self.db_path, lambda: EmptyModel(),
+            enable_long_memory=True,
+            enable_personal_understanding=False,
+        )
+        try:
+            status, error, attempts = worker.db.execute(
+                "SELECT status,last_error,attempts FROM background_jobs WHERE source_turn_id=?",
+                (turn_id,),
+            ).fetchone()
+            self.assertEqual(status, "failed")
+            self.assertEqual(error, "attempts_exhausted_after_restart")
+            self.assertEqual(attempts, 3)
+            self.assertFalse(worker.run_once())
+        finally:
+            worker.stop()
+
+    def test_durable_receipts_reconcile_jobs_completed_before_crash(self):
+        store = SQLiteConversationStore(self.db_path)
+        memory_turn = store.append_turn(
+            "我喜欢阅读。", "明白。",
+            background_jobs=(("long_memory.extract", 0),),
+        )
+        understanding_turn = store.append_turn(
+            "我重视自由。", "明白。",
+            background_jobs=(("personal_understanding.process", 0),),
+        )
+        model = EmptyModel()
+        LongMemory(store, model)
+        PersonalUnderstanding(store, model, recover_running_jobs=False)._enqueue(
+            understanding_turn, "normal"
+        )
+        store.connection.execute(
+            "INSERT INTO long_memory_extraction_receipts(turn_id) VALUES(?)",
+            (memory_turn,),
+        )
+        store.connection.execute(
+            "UPDATE understanding_jobs SET status='done' WHERE source_turn_id=?",
+            (understanding_turn,),
+        )
+        store.connection.execute(
+            "UPDATE background_jobs SET status='running',attempts=3 WHERE source_turn_id IN (?,?)",
+            (memory_turn, understanding_turn),
+        )
+        store.connection.commit()
+        store.close()
+
+        worker = BackgroundWorker(
+            self.db_path, lambda: model,
+            enable_long_memory=True,
+            enable_personal_understanding=True,
+        )
+        try:
+            statuses = worker.db.execute(
+                "SELECT source_turn_id,status FROM background_jobs ORDER BY source_turn_id"
+            ).fetchall()
+            self.assertEqual(
+                statuses,
+                [(memory_turn, "done"), (understanding_turn, "done")],
+            )
+            self.assertFalse(worker.run_once())
         finally:
             worker.stop()
 
