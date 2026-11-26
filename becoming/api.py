@@ -422,18 +422,29 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
         return {"success": True, "allowed": allowed, "key": key}
 
     @app.get("/api/v1/understanding/claims")
-    def list_understanding_claims(request: Request, limit: int = Query(default=100, ge=1, le=200)):
+    def list_understanding_claims(
+        request: Request,
+        limit: int = Query(default=100, ge=1, le=200),
+        offset: int = Query(default=0, ge=0),
+    ):
         rt = runtime_for(request)
         with rt.lock:
-            claims = rt.understanding_manager().list_claims(limit=limit)
-        return {"items": [_plain(item) for item in claims]}
+            claims = rt.understanding_manager().list_claims(limit=limit, offset=offset)
+        return {"items": [_plain(item) for item in claims], "limit": limit, "offset": offset}
 
     @app.get("/api/v1/understanding/claims/{claim_id}")
     def get_understanding_claim(claim_id: str, request: Request):
         rt = runtime_for(request)
         with rt.lock:
             manager = rt.understanding_manager()
-            claims = {item.id: item for item in manager.list_claims(limit=200)}
+            claims = {}
+            offset = 0
+            while True:
+                page = manager.list_claims(limit=200, offset=offset)
+                claims.update({item.id: item for item in page})
+                if len(page) < 200:
+                    break
+                offset += 200
             claim = claims.get(claim_id)
             if claim is None:
                 raise APIError(404, "claim_not_found", "个人理解记录不存在。")
@@ -446,7 +457,14 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
         with rt.lock:
             memories = rt.memory_manager().list_active()
             manager = rt.understanding_manager()
-            claims = manager.list_claims(limit=200)
+            claims = []
+            offset = 0
+            while True:
+                page = manager.list_claims(limit=200, offset=offset)
+                claims.extend(page)
+                if len(page) < 200:
+                    break
+                offset += 200
             growth_rows = rt.growth.connection.execute(
                 "SELECT id, kind, goal_id, text, status, version, created_at, updated_at "
                 "FROM growth_items ORDER BY id"
