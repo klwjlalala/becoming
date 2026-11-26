@@ -41,7 +41,8 @@ class APIHTTPTests(unittest.TestCase):
         deadline = time.time() + 15
         while time.time() < deadline:
             if cls.process.poll() is not None:
-                output, _ = cls.process.communicate(timeout=2)\n                raise RuntimeError("API server exited before becoming healthy:\\n" + output[-5000:])
+                output, _ = cls.process.communicate(timeout=2)
+                raise RuntimeError("API server exited before becoming healthy:\n" + output[-5000:])
             try:
                 with urlopen(cls.base + "/health", timeout=0.5) as response:
                     if response.status == 200:
@@ -50,14 +51,17 @@ class APIHTTPTests(unittest.TestCase):
                 time.sleep(0.1)
         else:
             cls.process.terminate()
-            output, _ = cls.process.communicate(timeout=2)\n            raise RuntimeError("API server did not become healthy:\\n" + output[-5000:])
+            output, _ = cls.process.communicate(timeout=2)
+            raise RuntimeError("API server did not become healthy:\n" + output[-5000:])
 
     @classmethod
     def tearDownClass(cls):
         if getattr(cls, "process", None) is not None:
             cls.process.terminate()
             try:
-                cls.process.wait(timeout=5)\n                if cls.process.stdout:\n                    cls.process.stdout.close()
+                cls.process.wait(timeout=5)
+                if cls.process.stdout:
+                    cls.process.stdout.close()
             except subprocess.TimeoutExpired:
                 cls.process.kill()
                 cls.process.wait(timeout=5)
