@@ -688,7 +688,7 @@ class PersonalUnderstanding:
             """).fetchone()[0]
             turn_count=self.db.execute("SELECT COUNT(*) FROM turns").fetchone()[0]
             if count>=MAX_TURNS_PER_BATCH or (turn_count>0 and turn_count%20==0):
-                event=self.process_pending(limit=MAX_TURNS_PER_BATCH)
+                event=self.process_pending(limit=MAX_TURNS_PER_BATCH,retry_failed=True)
                 processed,written,errors=event.processed_job_ids,event.written_claim_ids,event.errors
         result=UnderstandingEvent(written_claim_ids=tuple(written),queued_job_ids=(job_id,),
                                   processed_job_ids=tuple(processed),errors=tuple(errors))
