@@ -136,3 +136,43 @@ tests/test_memory_safety.py 覆盖分句/限定边界、旧记录再校验、独
 默认命令仅列出并校验测试夹具，不访问模型。真实执行需显式设置 BECOMING_BASE_URL、BECOMING_API_KEY、BECOMING_MODEL 并传入 --live。默认总调用预算为 60 次，超过预算立即停止；不自动重试。报告不会记录 API Key 或请求头。成长提案中的确认 nonce 会在报告中脱敏。
 
 报告包括逐轮真实回复、调用次数与耗时、记忆事件、候选/召回 ID、成长工具事件、合成确认结果及最终数据库状态。结构性断言用于发现存储、调用和状态问题；语义质量不自动评分。报告必须由人工逐轮审查，尤其是建议是否真正贴合用户、是否尊重自主权及安全响应是否充分。GitHub Actions 成功只代表评测执行完成，不代表产品质量验收通过。
+
+
+## 动态个人理解 V1 新增验收
+
+### 离线功能测试
+
+`tests/test_personal_understanding.py` 覆盖：
+
+- Evidence 原话必须来自对应 user_text；伪造引用、越权 Claim ID、过期版本和敏感/凭据候选拒绝。
+- Claim 创建、REINFORCE、REFINE、DISPUTE、REJECT、确认与版本历史。
+- 支持等级由程序计算；高支持等级需要跨日期的独立证据或用户明确确认。
+- 重要纠正即时更新、普通轮次最多 5 条合批、有限重试。
+- PendingConfirmation 只等待紧接着的下一轮用户回应；含糊回应和错过时机均过期。
+- 检索上下文、无关话题过滤、Agent 可选集成及默认路径无额外模型调用。
+- `/clear` 删除来源对话时，级联清除证据、无证据版本、命题、修订、待确认项和任务。
+
+默认离线命令仍为：
+
+    python -m unittest discover -s tests -v
+    python -m evaluation.personal_understanding
+
+### 真实模型显式集成
+
+`tests/live_personal_understanding.py` 使用独立内存数据库和虚构内容，验证用户明确要求更新、明确纠正旧理解、真实 Claim 版本变化、证据来源完整以及最终自然召回。它不进入默认离线测试发现范围。
+
+配置现有 `BECOMING_BASE_URL`、`BECOMING_API_KEY`、`BECOMING_MODEL` 后手动运行：
+
+    python -m unittest discover -s tests -p 'live_personal_understanding.py' -v
+
+### 30 轮纵向效果评测
+
+`evaluation/personal_understanding.py` 使用 `evaluation/personal_understanding_cases.json` 的 30 轮虚构对话，按顺序运行动态理解组；最终综合问题使用零轮近期历史窗口，并与同样零轮近期历史、未启用 PersonalUnderstanding 的基线回答对照。期望理解和人工评审标准只进入报告，不会注入 Agent。
+
+默认只校验夹具，不请求模型。显式运行：
+
+    python -m evaluation.personal_understanding --live --max-calls 80 --output artifacts/personal-understanding-live.json
+
+报告记录逐轮回复、更新/检索事件、Claim/Revision/证据来源、模型调用数和基线回答，不自动评分。真实模型输出必须人工审查，尤其是第三方/假设/短暂情绪过滤、用户纠正后的旧版本处理、反向证据保留、无关检索以及最终综合回答。单次运行不能证明稳定性。
+
+动态个人理解当前为同步原型：普通证据积累到 5 条或 20 轮触发点时同步批处理；CLI 退出时会 flush。GUI/服务端若需要真正不阻塞回复，后续应将 `process_pending` 放入后台 worker，而不是把当前同步行为误认为异步调度。CI 仅运行离线测试和夹具校验，不消耗模型额度，也不代表真实模型效果通过。
