@@ -20,7 +20,7 @@ jobs:
     if: >-
       github.ref == 'refs/heads/feat/live-quality-evaluation-v1' &&
       (github.event_name == 'workflow_dispatch' ||
-       github.event.head_commit.message == 'run live companion quality evaluation once 2026-11-26')
+       github.event.head_commit.message == 'run targeted live memory and growth re-evaluation once 2026-11-26')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -61,15 +61,17 @@ jobs:
         run: |
           python -m evaluation.live_quality \
             --live \
-            --max-calls 60 \
-            --output artifacts/live-quality-report.json
+            --case memory-lifecycle \
+            --case growth-action-journey \
+            --max-calls 45 \
+            --output artifacts/live-quality-recheck.json
       - name: Upload complete conversation and evidence report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: becoming-live-quality-report
+          name: becoming-live-quality-recheck
           path: |
-            artifacts/live-quality-report.json
-            artifacts/live-quality-report.md
+            artifacts/live-quality-recheck.json
+            artifacts/live-quality-recheck.md
           if-no-files-found: warn
           retention-days: 14

@@ -59,7 +59,7 @@ CASES = {
             "请记住：我喜欢周末独自徒步，安静的山林让我放松。",
             "我也不喜欢人多、嘈杂的商业场所。",
             "结合我之前提到的偏好，你觉得什么样的两天假期比较适合我？",
-            "我想更正一下：最近我开始喜欢和两三个熟悉的朋友一起徒步，但仍然不喜欢人多的商业场所。",
+            "我想更正一下：我现在不喜欢独自徒步了，最近更喜欢和两三个熟悉的朋友一起徒步；但仍然不喜欢人多的商业场所。",
             "我现在更喜欢怎样的徒步方式？",
             "回顾一下我最初和现在的徒步偏好变化。",
             "请解释一下 Python 的列表推导式。",
@@ -146,6 +146,18 @@ class BudgetedModel:
         self.calls += 1
         started = time.perf_counter()
         prompt_chars = sum(len(str(message.get("content", ""))) for message in messages)
+        system_text = next((str(message.get("content", "")) for message in messages
+                            if message.get("role") == "system"), "")
+        if "记忆提取器" in system_text:
+            call_kind = "memory_extraction"
+        elif "长期记忆检索条件解析器" in system_text:
+            call_kind = "memory_query_planning"
+        elif "记忆证据选择器" in system_text:
+            call_kind = "memory_evidence_ranking"
+        elif "个人成长与行动辅助" in system_text:
+            call_kind = "companion_with_growth_tools"
+        else:
+            call_kind = "companion_response"
         try:
             answer = self.delegate.complete(messages)
         except Exception as exc:
@@ -157,9 +169,10 @@ class BudgetedModel:
             })
             raise
         self.events.append({
-            "call": self.calls, "status": "ok",
+            "call": self.calls, "status": "ok", "kind": call_kind,
             "elapsed_seconds": round(time.perf_counter() - started, 3),
             "prompt_chars": prompt_chars, "response_chars": len(answer),
+            "response_excerpt": answer[:1600],
         })
         return answer
 
@@ -506,10 +519,14 @@ def render_markdown(report):
     return "\n".join(lines) + "\n"
 
 
-def run_live(model, max_calls):
+def run_live(model, max_calls, selected_cases=None):
+    selected = set(selected_cases or CASES)
+    if not selected or selected - set(CASES):
+        raise ValueError("Invalid live evaluation case selection")
     report = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "model": os.environ.get("BECOMING_MODEL", "configured-model"),
+        "selected_cases": [key for key in CASES if key in selected],
         "max_model_calls": max_calls, "model_calls": 0,
         "execution_status": "running", "scenarios": {},
         "global_notes": [
@@ -521,23 +538,29 @@ def run_live(model, max_calls):
     }
     counted = BudgetedModel(model, max_calls=max_calls)
     try:
-        life = CASES["meaning-and-correction"]
-        report["scenarios"]["meaning-and-correction"] = {
-            "title": life["title"],
-            "current_policy": run_dialogue(counted, life["turns"]),
-            "baseline_without_exploration_guidance": run_dialogue(counted, life["turns"], baseline=True),
-            "review": life["review"], "status": "manual_review_required",
-            "comparison_note": "Same model, separate conversations; stochastic output makes this qualitative, not a controlled causal estimate.",
-        }
-        decision = CASES["decision-with-constraints"]
-        report["scenarios"]["decision-with-constraints"] = {
-            "title": decision["title"], **run_dialogue(counted, decision["turns"]),
-            "review": decision["review"],
-        }
-        report["scenarios"]["memory-lifecycle"] = run_memory_lifecycle(counted)
-        report["scenarios"]["growth-action-journey"] = run_growth_journey(counted)
-        report["scenarios"]["listening-and-topic-switch"] = run_no_plan_journey(counted)
-        report["scenarios"]["immediate-safety"] = run_safety_probe(counted)
+        if "meaning-and-correction" in selected:
+            life = CASES["meaning-and-correction"]
+            report["scenarios"]["meaning-and-correction"] = {
+                "title": life["title"],
+                "current_policy": run_dialogue(counted, life["turns"]),
+                "baseline_without_exploration_guidance": run_dialogue(counted, life["turns"], baseline=True),
+                "review": life["review"], "status": "manual_review_required",
+                "comparison_note": "Same model, separate conversations; stochastic output makes this qualitative, not a controlled causal estimate.",
+            }
+        if "decision-with-constraints" in selected:
+            decision = CASES["decision-with-constraints"]
+            report["scenarios"]["decision-with-constraints"] = {
+                "title": decision["title"], **run_dialogue(counted, decision["turns"]),
+                "review": decision["review"],
+            }
+        if "memory-lifecycle" in selected:
+            report["scenarios"]["memory-lifecycle"] = run_memory_lifecycle(counted)
+        if "growth-action-journey" in selected:
+            report["scenarios"]["growth-action-journey"] = run_growth_journey(counted)
+        if "listening-and-topic-switch" in selected:
+            report["scenarios"]["listening-and-topic-switch"] = run_no_plan_journey(counted)
+        if "immediate-safety" in selected:
+            report["scenarios"]["immediate-safety"] = run_safety_probe(counted)
         report["execution_status"] = "completed_manual_review_required"
     except Exception as exc:
         report["execution_status"] = "incomplete"
@@ -575,14 +598,16 @@ def main():
     parser.add_argument("--validate", action="store_true", help="Validate fixtures without model calls")
     parser.add_argument("--output", type=Path, default=Path("live-quality-report.json"))
     parser.add_argument("--max-calls", type=int, default=MAX_MODEL_CALLS)
+    parser.add_argument("--case", choices=tuple(CASES), action="append",
+                        help="Run only selected scenario(s); may be repeated")
     args = parser.parse_args()
     try:
         validate_cases()
     except ValueError as exc:
         parser.error(str(exc))
     if not args.live:
-        if args.output != Path("live-quality-report.json") or args.max_calls != MAX_MODEL_CALLS:
-            parser.error("Output and call budget options require --live")
+        if args.output != Path("live-quality-report.json") or args.max_calls != MAX_MODEL_CALLS or args.case:
+            parser.error("Output, case and call budget options require --live")
         for key, case in CASES.items():
             print(f"{key}: {case['title']} ({len(case['turns'])} turns)")
         print("Fixture validation only; no model calls and no quality verdict.")
@@ -596,7 +621,7 @@ def main():
         model = OpenAICompatibleModel(
             os.environ["BECOMING_BASE_URL"], os.environ["BECOMING_API_KEY"],
             os.environ["BECOMING_MODEL"])
-        report = run_live(model, args.max_calls)
+        report = run_live(model, args.max_calls, args.case)
     except (ValueError, ModelError, OSError) as exc:
         report = {
             "created_at_utc": datetime.now(timezone.utc).isoformat(),

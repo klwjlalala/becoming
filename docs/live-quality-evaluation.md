@@ -64,3 +64,12 @@
 一次性工作流使用仓库 Secrets：BECOMING_BASE_URL、BECOMING_API_KEY、BECOMING_MODEL。专用测试分支上的特定提交触发真实模型评测；默认 CI 不执行真实模型调用。工作流上传 JSON/Markdown 报告作为 Artifact，保留 14 天。
 
 GitHub Actions 成功仅表示真实评测脚本完整运行。只有检查逐轮对话、结构性断言和实际数据库结果后，才能对产品效果作出判断。
+
+
+## 针对性复测
+
+评测 CLI 支持重复指定 --case，只运行所选场景。比如：
+
+    python -m evaluation.live_quality --live --case memory-lifecycle --case growth-action-journey --max-calls 45 --output artifacts/recheck.json
+
+针对性复测用于修复真实模型暴露的问题，避免每次都重跑全部场景和消耗完整预算。报告会记录记忆提取、检索规划、证据排序及回复等模型调用的响应摘要，以便定位 JSON 协议或提取失败；只使用虚构测试数据。

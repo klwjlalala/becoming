@@ -83,6 +83,23 @@ class GrowthTests(unittest.TestCase):
         self.assertIn("没有匹配", other.reply("/confirm " + agent.adapter.pending[0]))
         self.assertEqual(self.store.read("list_goals", {})["items"], [])
 
+    def test_tool_marker_after_preamble_is_executed(self):
+        raw = json.dumps({"tool": "list_goals", "args": {}}, ensure_ascii=False)
+        model = Scripted("我先检查一下现有记录。\\nGROWTH_TOOL\\n" + raw,
+                         "目前还没有成长目标。")
+        agent = GrowthAgent(model, self.history, self.store)
+        answer = agent.reply("帮我查看目标")
+        self.assertEqual(agent.last_event["status"], "read")
+        self.assertEqual(agent.last_event["result"]["items"], [])
+        self.assertEqual(answer, "目前还没有成长目标。")
+
+    def test_tool_marker_with_inline_json_is_executed(self):
+        raw = json.dumps({"tool": "list_goals", "args": {}}, ensure_ascii=False)
+        model = Scripted("我来查询。 GROWTH_TOOL " + raw, "目前还没有成长目标。")
+        agent = GrowthAgent(model, self.history, self.store)
+        self.assertEqual(agent.reply("查看目标"), "目前还没有成长目标。")
+        self.assertEqual(agent.last_event["status"], "read")
+
     def test_read_tools_return_actual_results_and_followup(self):
         self.create("create_goal", text="真实标记")
         model = Scripted(call("list_goals"), "你的目标如下", call("get_goal", goal_id=1), "详情")

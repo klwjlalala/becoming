@@ -10,6 +10,7 @@ from .models import Message
 class ConversationStore(Protocol):
     def recent(self, limit: int) -> list[Message]: ...
     def append_turn(self, user: str, assistant: str) -> int: ...
+    def update_assistant(self, turn_id: int, assistant: str) -> None: ...
 
 
 class SQLiteConversationStore:
@@ -48,6 +49,13 @@ class SQLiteConversationStore:
                 (user, assistant),
             )
             return cursor.lastrowid
+
+    def update_assistant(self, turn_id: int, assistant: str) -> None:
+        with self.connection:
+            cursor = self.connection.execute(
+                "UPDATE turns SET assistant_text=? WHERE id=?", (assistant, turn_id))
+            if cursor.rowcount != 1:
+                raise ValueError("Unknown conversation turn")
 
     def clear(self) -> None:
         with self.connection:

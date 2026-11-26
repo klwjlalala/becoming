@@ -6,6 +6,18 @@ from .long_memory import LongMemory, MemoryEvent
 import sqlite3
 
 
+_MEMORY_UPDATE_CUES = (
+    "请记住", "记住：", "记住:", "帮我记", "记下", "我想更正一下",
+    "更正一下我的", "更新我的偏好", "更新你对我的理解",
+    "请更新我的记忆", "remember this", "please remember", "update my memory",
+)
+
+
+def _is_explicit_memory_update(text: str) -> bool:
+    lowered = text.casefold()
+    return any(cue.casefold() in lowered for cue in _MEMORY_UPDATE_CUES)
+
+
 class Agent:
     def __init__(self, model: Model, store: ConversationStore, history_turns: int = 12,
                  long_memory: LongMemory | None = None):
@@ -53,6 +65,12 @@ class Agent:
                     errors.append("extract_partial")
             except (ModelError, sqlite3.Error, ValueError):
                 errors.append("extract_failed")
+        if self.long_memory is not None and "extract_failed" in errors and _is_explicit_memory_update(text):
+            reply += "\n\n不过，这次长期记忆没有成功保存或更新；我不想让你误以为已经记住。"
+            try:
+                self.store.update_assistant(turn_id, reply)
+            except (AttributeError, sqlite3.Error):
+                errors.append("transcript_update_failed")
         self.last_memory_event = MemoryEvent(
             tuple(m.id for m in memories), written, tuple(errors),
             self.long_memory.last_search if self.long_memory is not None else None)

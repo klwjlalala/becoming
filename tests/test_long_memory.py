@@ -92,6 +92,25 @@ class LongMemoryTests(unittest.TestCase):
                 self.assertEqual(memory.list_active(), [])
         self.assertEqual(len(self.store.recent()), 4)
 
+    def test_explicit_memory_request_reports_extraction_failure_truthfully(self):
+        model = ScriptedModel("记下了。", "not valid JSON")
+        memory = LongMemory(self.store, model)
+        agent = Agent(model, self.store, long_memory=memory)
+        answer = agent.reply("请记住：我喜欢周末徒步。")
+        self.assertIn("长期记忆没有成功保存", answer)
+        self.assertEqual(agent.last_memory_event.errors, ("extract_failed",))
+        self.assertEqual(self.store.recent(1)[-1]["content"], answer)
+        self.assertEqual(memory.list_active(), [])
+
+    def test_memory_failure_note_is_not_added_to_unrelated_turn(self):
+        model = ScriptedModel("收到。", "not valid JSON")
+        memory = LongMemory(self.store, model)
+        agent = Agent(model, self.store, long_memory=memory)
+        answer = agent.reply("今天有点累。")
+        self.assertEqual(answer, "收到。")
+        self.assertNotIn("长期记忆没有成功保存", answer)
+        self.assertEqual(agent.last_memory_event.errors, ("extract_failed",))
+
     def test_failed_reply_does_not_extract(self):
         model = ScriptedModel(ModelError("failed"))
         memory = LongMemory(self.store, model)
