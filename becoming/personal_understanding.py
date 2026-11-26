@@ -408,6 +408,20 @@ class PersonalUnderstanding:
                     WHERE id NOT IN (SELECT DISTINCT claim_version_id FROM understanding_claim_evidence);
                     DELETE FROM understanding_revisions
                     WHERE id NOT IN (SELECT DISTINCT revision_id FROM understanding_revision_evidence);
+                    UPDATE understanding_claim_versions
+                    SET status='active'
+                    WHERE status='superseded'
+                      AND version=(
+                          SELECT MAX(v2.version) FROM understanding_claim_versions v2
+                          WHERE v2.claim_id=understanding_claim_versions.claim_id
+                      )
+                      AND claim_id IN (
+                          SELECT id FROM understanding_claims
+                          WHERE current_version NOT IN (
+                              SELECT version FROM understanding_claim_versions
+                              WHERE claim_id=understanding_claims.id
+                          )
+                      );
                     UPDATE understanding_claims
                     SET current_version=COALESCE((
                         SELECT MAX(version) FROM understanding_claim_versions
