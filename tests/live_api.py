@@ -33,8 +33,8 @@ class LiveAPIHTTPTests(unittest.TestCase):
             "BECOMING_API_PORT": str(cls.port),
             "BECOMING_API_DB": str(Path(cls.temp.name) / "conversations.sqlite3"),
             "BECOMING_API_GROWTH_DB": str(Path(cls.temp.name) / "growth.sqlite3"),
-            "BECOMING_ENABLE_LONG_MEMORY": "0",
-            "BECOMING_ENABLE_PERSONAL_UNDERSTANDING": "0",
+            "BECOMING_ENABLE_LONG_MEMORY": "1",
+            "BECOMING_ENABLE_PERSONAL_UNDERSTANDING": "1",
         })
         cls.process = subprocess.Popen(
             [sys.executable, "-c", "from becoming.api import run; run()"],
@@ -96,7 +96,7 @@ class LiveAPIHTTPTests(unittest.TestCase):
         )
         result = self.request(
             "POST", f"/conversations/{conversation['id']}/messages",
-            {"content": "请用一句话确认你已经通过 Becoming HTTP API 的真实模型联调。"},
+            {"content": "我长期偏好在晚上阅读纸质小说。这是一条用于接口联调的合成测试数据。"},
         )
         self.assertIsInstance(result["reply"], str)
         self.assertTrue(result["reply"].strip())
@@ -106,6 +106,25 @@ class LiveAPIHTTPTests(unittest.TestCase):
             "GET", f"/conversations/{conversation['id']}/messages"
         )
         self.assertEqual(len(history["items"]), 1)
+
+        # Verify both real-model post-turn processors finish outside the
+        # chat request, not merely that the HTTP stub accepts their payloads.
+        deadline = time.time() + 180
+        while time.time() < deadline:
+            jobs = self.request(
+                "GET", f"/background/jobs?source_turn_id={result['message_id']}&limit=10"
+            )["items"]
+            if len(jobs) == 2 and all(job["status"] == "done" for job in jobs):
+                break
+            if any(job["status"] == "failed" for job in jobs):
+                self.fail(f"Real-model background processing failed: {jobs}")
+            time.sleep(0.5)
+        else:
+            self.fail(f"Real-model background processing timed out: {jobs}")
+        self.assertEqual(
+            {job["kind"] for job in jobs},
+            {"long_memory.extract", "personal_understanding.process"},
+        )
 
         preview = self.request(
             "POST", "/growth/changes",
