@@ -539,8 +539,9 @@ class PersonalUnderstanding:
                              "recorded_at":e[3],"event_time":e[4]} for e in evidence],
             })
         serialized = json.dumps(payload,ensure_ascii=False)
-        if len(serialized)>MAX_CONTEXT_CHARS:
-            serialized=serialized[:MAX_CONTEXT_CHARS]
+        while len(serialized)>MAX_CONTEXT_CHARS and payload:
+            payload.pop()
+            serialized=json.dumps(payload,ensure_ascii=False)
         return UNDERSTANDING_CONTEXT+"\n"+serialized
 
     def _candidate_claims(self, query: str) -> list[Claim]:
@@ -555,7 +556,7 @@ class PersonalUnderstanding:
             """,(claim.version_id,)))
             ranked.append((len(q & terms(claim.content+" "+evidence)),claim.updated_at,claim))
         ranked.sort(key=lambda row:(row[0],row[1]),reverse=True)
-        return [row[2] for row in ranked[:30]]
+        return [row[2] for row in ranked[:15]]
 
     def _enqueue(self, turn_id: int, kind: str) -> int:
         row=self.db.execute("SELECT id FROM understanding_jobs WHERE job_key=?",(f"turn:{turn_id}",)).fetchone()
@@ -614,10 +615,22 @@ class PersonalUnderstanding:
             "turns":[{"turn_index":i,"source_turn_id":item["turn_id"],
                       "user_text":item["user_text"],"assistant_text":item["assistant_text"],
                       "recorded_at":item["recorded_at"]} for i,item in enumerate(turns)],
-            "current_claims":[{"claim_id":c.id,"version":c.version,"content":c.content,
-                               "dimension":c.dimension,"basis":c.basis,"scope":c.scope,
-                               "temporal_scope":c.temporal_scope,"support_level":c.support_level,
-                               "user_validation":c.user_validation,"status":c.status} for c in claims],
+            "current_claims":[
+                {"claim_id":c.id,"version":c.version,"content":c.content,
+                 "dimension":c.dimension,"basis":c.basis,"scope":c.scope,
+                 "temporal_scope":c.temporal_scope,"support_level":c.support_level,
+                 "user_validation":c.user_validation,"status":c.status,
+                 "evidence":[
+                     {"quote":e[0],"kind":e[1],"relation":e[2],"recorded_at":e[3]}
+                     for e in self.db.execute("""
+                         SELECT e.quote,e.kind,ce.relation,e.recorded_at
+                         FROM understanding_claim_evidence ce
+                         JOIN understanding_evidence e ON e.id=ce.evidence_id
+                         WHERE ce.claim_version_id=? ORDER BY e.id DESC LIMIT 2
+                     """,(c.version_id,))
+                 ]}
+                for c in claims
+            ],
             "rules":{"max_turns":MAX_TURNS_PER_BATCH,"no_write_is_valid":True,
                      "source_of_evidence":"user_text_only"},
         }
