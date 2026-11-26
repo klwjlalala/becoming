@@ -25,3 +25,5 @@ jobs:
         run: python -m evaluation
       - name: Validate longitudinal quality fixtures (offline)
         run: python -m evaluation.memory_quality
+      - name: Validate integrated service-loop fixtures (offline)
+        run: python -m evaluation.service_loop

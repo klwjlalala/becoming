@@ -11,6 +11,7 @@ from io import StringIO
 
 from becoming.__main__ import main
 from becoming.models import ModelError
+from becoming.growth_store import GrowthStore
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -66,6 +67,61 @@ class CLITests(unittest.TestCase):
             result = self.run_cli("--demo", "--db", tmp)
             self.assertEqual(result.returncode, 1)
             self.assertIn("Startup failed", result.stderr)
+
+
+    def test_growth_tools_are_available_from_unified_entrypoint(self):
+        result = self.run_cli("--demo", "--growth", "--db", ":memory:",
+                              "--growth-db", ":memory:", stdin="你好\n/exit\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("成长辅助已启用", result.stdout)
+        self.assertIn("Becoming：", result.stdout)
+
+    def test_growth_database_requires_separate_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "same.sqlite")
+            result = self.run_cli("--demo", "--growth", "--db", path,
+                                  "--growth-db", path)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("must be separate", result.stderr)
+
+    def test_clear_growth_requires_explicit_second_confirmation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "growth.sqlite"
+            seed = GrowthStore(path)
+            goal = seed.apply(seed.prepare("create_goal", {"text": "测试目标"}))["record"]
+            seed.apply(seed.prepare("create_action", {"goal_id": goal["id"], "text": "测试行动"}))
+            seed.close()
+            with patch("sys.argv", ["becoming", "--demo", "--growth", "--db", ":memory:",
+                                    "--growth-db", str(path)]), \
+                 patch("builtins.input", side_effect=["/clear-growth",
+                                                       "/confirm-growth-clear 12345678",
+                                                       "/exit"]), \
+                 patch("becoming.__main__.secrets.token_hex", return_value="12345678"), \
+                 patch("sys.stdout", new_callable=StringIO) as stdout, \
+                 patch("sys.stderr", new_callable=StringIO) as stderr:
+                self.assertEqual(main(), 0)
+                self.assertIn("成长记录已清除", stdout.getvalue())
+                self.assertNotIn("Traceback", stderr.getvalue())
+            check = GrowthStore(path)
+            try:
+                self.assertEqual(check.read("list_goals", {})["items"], [])
+            finally:
+                check.close()
+
+    def test_clear_conversation_does_not_delete_growth_records(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "growth.sqlite"
+            seed = GrowthStore(path)
+            seed.apply(seed.prepare("create_goal", {"text": "保留的目标"}))
+            seed.close()
+            result = self.run_cli("--demo", "--growth", "--db", ":memory:",
+                                  "--growth-db", str(path), stdin="/clear\n/exit\n")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            check = GrowthStore(path)
+            try:
+                self.assertEqual(check.read("list_goals", {})["items"][0]["text"], "保留的目标")
+            finally:
+                check.close()
 
     def test_cli_continues_after_model_error(self):
         with tempfile.TemporaryDirectory() as tmp:

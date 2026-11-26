@@ -82,7 +82,9 @@ class GrowthModel:
                 except ModelError:
                     final = "已读取记录，但模型未能完成解读。"
                     self.event["followup_failed"] = True
-                return final.strip() if not self.event.get("followup_failed") else final.strip()
+                if self.event.get("followup_failed"):
+                    return final.strip() + "\n实际查询结果：\n" + _dump(result)
+                return final.strip()
             preview = self.store.prepare(tool, args)
             token = secrets.token_hex(4)
             self.pending = (token, preview)
