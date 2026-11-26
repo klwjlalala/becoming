@@ -723,25 +723,37 @@ class PersonalUnderstandingTests(unittest.TestCase):
         engine.observe_turn(
             turn_b, "我喜欢和朋友深入交流。", question_b, process=False
         )
+        answer_b = "先说说别的事。"
+        next_b = other_store.append_turn(answer_b, "好的。")
 
         answer_a = "是的，我认可这个理解。"
         next_a = self.store.append_turn(answer_a, "谢谢。")
         # The answer can arrive before the understanding model finishes.
         self.assertEqual(engine.resolve_pending_confirmation(answer_a, next_a), ())
+        self.assertEqual(engine.resolve_pending_confirmation(answer_b, next_b), ())
 
         first = engine.process_pending(limit=1)
         second = engine.process_pending(limit=1)
         self.assertFalse(first.errors)
         self.assertFalse(second.errors)
 
+        # A later turn in conversation B must not expire A's pending confirmation.
+        self.assertEqual(engine.resolve_pending_confirmation(answer_b, next_b), ())
+        pending_before_reconciliation = engine.pending_confirmations()
+        self.assertEqual(len(pending_before_reconciliation), 1)
+        self.assertEqual(pending_before_reconciliation[0]["source_turn_id"], turn_a)
+
         resolved = engine.resolve_deferred_confirmations()
         self.assertEqual(len(resolved), 1)
         claims = engine.list_claims()
         confirmed = next(item for item in claims if item.user_validation == "confirmed")
         self.assertEqual(confirmed.content, "用户重视自主安排时间。")
-        pending = engine.pending_confirmations()
-        self.assertEqual(len(pending), 1)
-        self.assertEqual(pending[0]["source_turn_id"], turn_b)
+        self.assertEqual(engine.pending_confirmations(), [])
+        other_status = self.store.connection.execute(
+            "SELECT status FROM understanding_pending_confirmations WHERE source_turn_id=?",
+            (turn_b,),
+        ).fetchone()[0]
+        self.assertEqual(other_status, "expired")
 
         other_store.close()
 
