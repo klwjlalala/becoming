@@ -71,7 +71,7 @@ class AppRuntime:
         base_url = os.environ.get("BECOMING_BASE_URL", "https://api.openai.com/v1")
         api_key = os.environ.get("BECOMING_API_KEY", "")
         model_name = os.environ.get("BECOMING_MODEL", "")
-        config = {"base_url": base_url, "model": model_name}
+        config = {"base_url": base_url, "api_key": api_key, "model": model_name}
         model: Model | None
         if demo:
             model = DemoModel()
