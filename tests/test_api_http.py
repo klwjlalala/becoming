@@ -5,8 +5,10 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -15,22 +17,65 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class FakeModelHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        size = int(self.headers.get("Content-Length", "0"))
+        payload = json.loads(self.rfile.read(size).decode("utf-8"))
+        messages = payload.get("messages", [])
+        user_text = next(
+            (item.get("content", "") for item in reversed(messages)
+             if item.get("role") == "user"),
+            "",
+        )
+        if "请帮我创建成长目标" in user_text:
+            reply = (
+                "GROWTH_TOOL\n"
+                + json.dumps({
+                    "tool": "create_goal",
+                    "args": {"text": "每周自由探索一次"},
+                }, ensure_ascii=False)
+            )
+        elif "Connection test" in user_text:
+            reply = "OK"
+        else:
+            reply = "模拟模型回复。"
+        body = json.dumps({
+            "choices": [{"message": {"role": "assistant", "content": reply}}]
+        }, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        return
+
+
 class APIHTTPTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory()
+        cls.model_server = ThreadingHTTPServer(("127.0.0.1", 0), FakeModelHandler)
+        cls.model_port = cls.model_server.server_address[1]
+        cls.model_thread = threading.Thread(target=cls.model_server.serve_forever, daemon=True)
+        cls.model_thread.start()
+
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             cls.port = sock.getsockname()[1]
         cls.base = f"http://127.0.0.1:{cls.port}/api/v1"
         env = os.environ.copy()
+        env.pop("BECOMING_DEMO", None)
         env.update({
             "PYTHONPATH": str(ROOT),
             "BECOMING_API_HOST": "127.0.0.1",
             "BECOMING_API_PORT": str(cls.port),
             "BECOMING_API_DB": str(Path(cls.temp.name) / "conversations.sqlite3"),
             "BECOMING_API_GROWTH_DB": str(Path(cls.temp.name) / "growth.sqlite3"),
-            "BECOMING_DEMO": "1",
+            "BECOMING_BASE_URL": f"http://127.0.0.1:{cls.model_port}/v1",
+            "BECOMING_API_KEY": "test-api-key-never-return-this",
+            "BECOMING_MODEL": "test-model",
             "BECOMING_ENABLE_LONG_MEMORY": "0",
             "BECOMING_ENABLE_PERSONAL_UNDERSTANDING": "0",
         })
@@ -65,6 +110,9 @@ class APIHTTPTests(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 cls.process.kill()
                 cls.process.wait(timeout=5)
+        if getattr(cls, "model_server", None) is not None:
+            cls.model_server.shutdown()
+            cls.model_server.server_close()
         if getattr(cls, "temp", None) is not None:
             cls.temp.cleanup()
 
@@ -92,8 +140,16 @@ class APIHTTPTests(unittest.TestCase):
         self.assertTrue(health["model_configured"])
 
         config = self.request("GET", "/model/config")
-        self.assertTrue(config["demo"])
+        self.assertFalse(config["demo"])
+        self.assertTrue(config["api_key_configured"])
         self.assertIsNone(config["api_key"])
+
+        model_test = self.request("POST", "/model/test", {
+            "base_url": f"http://127.0.0.1:{self.model_port}/v1",
+            "api_key": "temporary-test-key",
+            "model": "test-model",
+        })
+        self.assertTrue(model_test["success"])
 
         first = self.request("POST", "/conversations", {"title": "第一个会话"}, 201)
         second = self.request("POST", "/conversations", {"title": "第二个会话"}, 201)
@@ -103,35 +159,34 @@ class APIHTTPTests(unittest.TestCase):
             "POST", f"/conversations/{first_id}/messages",
             {"content": "你好，请介绍一下你能做什么。"},
         )
-        self.assertIn("reply", sent)
+        self.assertIn("模拟模型回复", sent["reply"])
         self.assertTrue(sent["message_id"])
         self.assertFalse(sent["confirmation_required"])
 
+        proposal = self.request(
+            "POST", f"/conversations/{first_id}/messages",
+            {"content": "请帮我创建成长目标：每周自由探索一次。"},
+        )
+        self.assertTrue(proposal["confirmation_required"])
+        self.assertEqual(proposal["growth_event"]["status"], "proposed")
+        token = proposal["confirmation"]["token"]
+        self.assertNotIn(token, proposal["reply"])
+        committed = self.request(
+            "POST", f"/conversations/{first_id}/confirm", {"token": token}
+        )
+        self.assertEqual(committed["growth_event"]["status"], "committed")
+
         first_history = self.request("GET", f"/conversations/{first_id}/messages")
         second_history = self.request("GET", f"/conversations/{second_id}/messages")
-        self.assertEqual(len(first_history["items"]), 1)
+        self.assertEqual(len(first_history["items"]), 3)
         self.assertEqual(second_history["items"], [])
 
-        preview = self.request(
-            "POST", "/growth/changes",
-            {"tool": "create_goal", "args": {"text": "每周自由探索一次"}},
-            201,
-        )
-        self.assertTrue(preview["confirmation_required"])
-        committed = self.request(
-            "POST", f"/growth/changes/{preview['token']}/confirm"
-        )
-        self.assertTrue(committed["success"])
         goals = self.request("GET", "/growth/goals")
         self.assertEqual(goals["items"][0]["text"], "每周自由探索一次")
-        self.request(
-            "POST", f"/growth/changes/{preview['token']}/confirm", expected=409
-        )
-
         self.assertIn("items", self.request("GET", "/memories"))
         self.assertIn("items", self.request("GET", "/understanding/claims"))
         exported = self.request("GET", "/data/export")
-        self.assertEqual(len(exported["turns"]), 1)
+        self.assertEqual(len(exported["turns"]), 3)
         self.assertEqual(len(exported["growth_items"]), 1)
 
         clear = self.request("POST", "/data/clear")
@@ -143,6 +198,16 @@ class APIHTTPTests(unittest.TestCase):
         self.assertEqual(self.request("GET", "/growth/goals")["items"], [])
         remaining = self.request("GET", "/conversations")
         self.assertEqual([item["id"] for item in remaining["items"]], ["default"])
+
+        secret = "do-not-return-this-key"
+        updated = self.request("PUT", "/model/config", {
+            "base_url": f"http://127.0.0.1:{self.model_port}/v1",
+            "api_key": secret,
+            "model": "test-model",
+        })
+        self.assertIsNone(updated["api_key"])
+        self.assertNotIn(secret, json.dumps(updated))
+        self.assertNotIn(secret, json.dumps(self.request("GET", "/model/config")))
 
     def test_conversation_delete_cascades_only_selected_session(self):
         first = self.request("POST", "/conversations", {"title": "保留会话"}, 201)
