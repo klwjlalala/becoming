@@ -165,12 +165,12 @@ class APIHTTPTests(unittest.TestCase):
         if getattr(cls, "process", None) is not None:
             cls.process.terminate()
             try:
-                cls.process.wait(timeout=5)
-                if cls.process.stdout:
-                    cls.process.stdout.close()
+                output, _ = cls.process.communicate(timeout=5)
             except subprocess.TimeoutExpired:
                 cls.process.kill()
-                cls.process.wait(timeout=5)
+                output, _ = cls.process.communicate(timeout=5)
+            if output and ("ERROR" in output or "Traceback" in output):
+                print("API SERVER DIAGNOSTICS\\n" + output[-12000:])
         if getattr(cls, "model_server", None) is not None:
             cls.model_server.shutdown()
             cls.model_server.server_close()
