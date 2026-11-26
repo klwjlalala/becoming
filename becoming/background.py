@@ -45,6 +45,9 @@ class BackgroundWorker:
         self.last_error: str | None = None
         self._closed = False
         self._close_lock = threading.Lock()
+        self._state = threading.Condition()
+        self._paused = False
+        self._active_jobs = 0
 
         # Ensure worker-owned schemas exist and recover the older
         # understanding-specific queue before accepting work.
@@ -82,6 +85,29 @@ class BackgroundWorker:
         self.wake_event.set()
 
     def wake(self) -> None:
+        self.wake_event.set()
+
+    def pause(self, timeout: float = 5.0) -> bool:
+        """Stop claiming new jobs and wait for the active job to finish.
+
+        A timed-out pause remains in effect; callers must call resume() in a
+        finally block so the worker cannot be left paused accidentally.
+        """
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._state:
+            self._paused = True
+            self.wake_event.set()
+            while self._active_jobs:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._state.wait(remaining)
+            return True
+
+    def resume(self) -> None:
+        with self._state:
+            self._paused = False
+            self._state.notify_all()
         self.wake_event.set()
 
     def stop(self, timeout: float = 5.0) -> None:
@@ -186,19 +212,31 @@ class BackgroundWorker:
 
     def run_once(self) -> bool:
         """Process one ready job; exposed for deterministic unit tests."""
-        job = self._claim()
-        if job is None:
-            return False
+        # Claim and register the active job under one condition lock. This
+        # closes the race where pause() could observe zero active jobs after a
+        # claim but before processing had registered itself.
+        with self._state:
+            if self._paused:
+                return False
+            job = self._claim()
+            if job is None:
+                return False
+            self._active_jobs += 1
         try:
-            self._process(job)
-            self.last_error = None
-        except Exception as exc:
-            error = str(exc) if str(exc) in {
-                "model_not_configured", "personal_understanding_update_failed",
-                "unknown_background_job",
-            } else "background_task_failed"
-            self.last_error = error
-            self._fail(job, error)
+            try:
+                self._process(job)
+                self.last_error = None
+            except Exception as exc:
+                error = str(exc) if str(exc) in {
+                    "model_not_configured", "personal_understanding_update_failed",
+                    "unknown_background_job",
+                } else "background_task_failed"
+                self.last_error = error
+                self._fail(job, error)
+        finally:
+            with self._state:
+                self._active_jobs -= 1
+                self._state.notify_all()
         return True
 
     def _run(self) -> None:
@@ -231,5 +269,7 @@ class BackgroundWorker:
             "counts": totals,
             "by_kind": counts,
             "last_error": self.last_error,
+            "paused": self._paused,
+            "active_jobs": self._active_jobs,
             "max_attempts": MAX_ATTEMPTS,
         }
