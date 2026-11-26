@@ -28,9 +28,8 @@ MAX_CONTEXT_CHARS = 6000
 SECRET = re.compile(
     r"(?:\bsk-[a-z0-9_-]{12,}|\b(?:api[_ -]?key|password|密码|密钥)\s*[:：=]\s*\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----)", re.I)
 SENSITIVE = re.compile(
-    r"(?:身份证(?:号|号码)?|护照号|银行卡号|信用卡号|诊断为|确诊(?:患有|为)|"
-    r"抑郁症|双相障碍|精神分裂症|艾滋病|HIV阳性|性取向|同性恋|异性恋|"
-    r"宗教信仰|政治立场|党员身份|民族身份)", re.I)
+    r"(?:身份证|护照号|银行卡号|信用卡号|诊断|确诊|抑郁|双相障碍|精神分裂|艾滋|HIV|"
+    r"性取向|同性恋|异性恋|宗教|信仰|政治立场|政治倾向|党员|民族|种族|性别认同|婚姻状况)", re.I)
 URGENT_CUES = (
     "你理解错了", "我理解错了", "更新你对我的理解", "请更新我的理解",
     "我重新想过", "我改变主意", "我现在决定", "我已经决定",
@@ -212,6 +211,9 @@ def parse_proposal(raw: str, turns: list[dict], claims: list[Claim]) -> dict:
         scope = _validate_scope(op["scope"])
         if not isinstance(temporal_scope, str) or not temporal_scope.strip() or len(temporal_scope) > 160:
             raise ValueError("invalid temporal scope")
+        protected_text = content + " " + temporal_scope + " " + json.dumps(scope, ensure_ascii=False)
+        if SECRET.search(protected_text) or SENSITIVE.search(protected_text):
+            raise ValueError("sensitive or credential-like claim rejected")
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 400:
             raise ValueError("invalid revision reason")
         claim_ref, claim_id, expected_version = (
