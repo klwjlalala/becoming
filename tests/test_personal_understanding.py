@@ -1,5 +1,8 @@
 import json
+import tempfile
+import threading
 import unittest
+from pathlib import Path
 
 from becoming.agent import Agent
 from becoming.memory import SQLiteConversationStore
@@ -776,6 +779,77 @@ class PersonalUnderstandingTests(unittest.TestCase):
             (turn_id,),
         ).fetchone()[0]
         self.assertEqual(status, "running")
+
+    def test_confirmation_resolution_is_serialized_across_connections(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = str(Path(directory) / "shared.sqlite3")
+            first_store = SQLiteConversationStore(db_path)
+            second_store = SQLiteConversationStore(db_path)
+            try:
+                question = "你觉得我这样理解准确吗？"
+                proposal = json.loads(create_proposal(assistant=question))
+                proposal["confirmation"] = {
+                    "claim_id": None, "claim_ref": "c1", "expected_version": 1,
+                    "turn_index": 0, "question": question,
+                }
+                first_model = ScriptedModel(json.dumps(proposal, ensure_ascii=False))
+                first_engine = PersonalUnderstanding(first_store, first_model)
+                user_text = "我更在意能自己安排时间。"
+                source_turn = first_store.append_turn(user_text, question)
+                first_engine.observe_turn(
+                    source_turn, user_text, question, process=False
+                )
+                processed = first_engine.process_pending(limit=1)
+                self.assertFalse(processed.errors)
+                next_text = "是的，我认可这个理解。"
+                next_turn = first_store.append_turn(next_text, "谢谢你确认。")
+                second_engine = PersonalUnderstanding(
+                    second_store, ScriptedModel(),
+                    recover_running_jobs=False, initialize_schema=False,
+                )
+
+                barrier = threading.Barrier(2)
+                results = []
+                errors = []
+
+                def resolve(engine):
+                    try:
+                        barrier.wait(timeout=2)
+                        results.append(
+                            engine.resolve_pending_confirmation(next_text, next_turn)
+                        )
+                    except BaseException as exc:
+                        errors.append(exc)
+
+                workers = [
+                    threading.Thread(target=resolve, args=(first_engine,)),
+                    threading.Thread(target=resolve, args=(second_engine,)),
+                ]
+                for thread in workers:
+                    thread.start()
+                for thread in workers:
+                    thread.join(timeout=5)
+                self.assertTrue(all(not thread.is_alive() for thread in workers))
+                self.assertEqual(errors, [])
+                self.assertEqual(sorted(len(result) for result in results), [0, 1])
+
+                claim = first_store.connection.execute(
+                    "SELECT current_version,status FROM understanding_claims"
+                ).fetchone()
+                self.assertEqual(claim, (2, "active"))
+                confirmations = first_store.connection.execute("""
+                    SELECT COUNT(*) FROM understanding_revisions
+                    WHERE operation='CONFIRM'
+                """).fetchone()[0]
+                self.assertEqual(confirmations, 1)
+                pending_status = first_store.connection.execute("""
+                    SELECT status FROM understanding_pending_confirmations
+                    WHERE source_turn_id=?
+                """, (source_turn,)).fetchone()[0]
+                self.assertEqual(pending_status, "confirmed")
+            finally:
+                second_store.close()
+                first_store.close()
 
     def test_claim_list_offset_pagination_is_stable(self):
         model = ScriptedModel(
