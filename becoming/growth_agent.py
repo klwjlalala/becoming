@@ -160,7 +160,7 @@ class GrowthAgent:
                            "transcript_log_failed": not logged}
         return True
 
-    def reply(self, text):
+    def reply(self, text, *, defer_post_turn=False):
         text = text.strip()
         self.last_event = None
         if not text:
@@ -195,7 +195,7 @@ class GrowthAgent:
         # Any new message invalidates a pending proposal before it reaches the model.
         self._cancel_pending("用户开始了新的对话")
         try:
-            answer = self.agent.reply(text)
+            answer = self.agent.reply(text, defer_post_turn=defer_post_turn)
         except BaseException:
             self.adapter.pending = None
             raise
