@@ -97,3 +97,15 @@ V1.3 增加来源分句校验、单轮最多12条记忆、独立提取失败隔�
     python -m evaluation.memory_quality --live --improved --case quality-003
 
 可另设置 BECOMING_EMBEDDING_MODEL 并启用 --embedding-memory（CLI）或 --embedding（评测）来比较配置服务的向量接口。无该配置不要开启。分批扫描有额外调用成本；向量实验不代表已验证效果。
+
+
+### 真实模型完整质量测试（虚构场景）
+
+开发分支的一次性真实模型质量测试：
+
+    python -m evaluation.live_quality --validate
+    python -m evaluation.live_quality --live --max-calls 60 --output artifacts/live-quality-report.json
+
+测试包含人生意义与纠正理解、现实约束下的决策、长期记忆生命周期、成长工具完整流程、倾听与话题切换、即时安全风险。所有输入均为虚构内容；记忆场景关闭近期历史窗口，以单独验证长期记忆。成长场景只由测试夹具确认与预期工具和 ID 完全匹配的合成操作，不代表产品自动授权。报告保留逐轮回复、实际记忆/工具事件和 SQLite 最终状态；不使用 LLM 裁判自动给出质量通过结论。完整说明见 docs/live-quality-evaluation.md。
+
+GitHub Actions 一次性执行使用仓库 Secrets：BECOMING_BASE_URL、BECOMING_API_KEY、BECOMING_MODEL。工作流仅由指定测试分支上包含工作流文件的专用提交触发，设置 60 次模型调用硬上限，并上传 JSON/Markdown 报告。真实模型步骤不进入默认 CI。
