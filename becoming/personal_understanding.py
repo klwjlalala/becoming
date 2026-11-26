@@ -1145,7 +1145,11 @@ class PersonalUnderstanding:
             version_row=self.db.execute(
                 "SELECT version FROM understanding_claim_versions WHERE id=?",(pending[2],)
             ).fetchone()
-            if kind is None or version_row is None or pending[4]!=version_row[0]:
+            current_claim=self.db.execute(
+                "SELECT current_version FROM understanding_claims WHERE id=?",(pending[1],)
+            ).fetchone()
+            if (kind is None or version_row is None or current_claim is None
+                    or pending[4]!=version_row[0] or current_claim[0]!=pending[4]):
                 self.db.execute("""
                     UPDATE understanding_pending_confirmations SET status='expired',resolved_at=? WHERE id=?
                 """,(_now(),pending[0]))
