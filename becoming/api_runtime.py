@@ -188,14 +188,16 @@ class AppRuntime:
 
     def background_status(self) -> dict:
         if self.background_worker is None:
+            by_kind = self.store.background_job_counts()
+            totals = {
+                state: sum(counts.get(state, 0) for counts in by_kind.values())
+                for state in ("pending", "running", "done", "failed", "cancelled")
+            }
             return {
                 "running": False,
                 "supported": self.background_supported,
-                "counts": {
-                    "pending": 0, "running": 0, "done": 0,
-                    "failed": 0, "cancelled": 0,
-                },
-                "by_kind": self.store.background_job_counts(),
+                "counts": totals,
+                "by_kind": by_kind,
                 "last_error": None,
                 "max_attempts": 3,
             }
