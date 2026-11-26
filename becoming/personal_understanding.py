@@ -520,6 +520,13 @@ class PersonalUnderstanding:
                 END;
             """)
 
+        # Recover jobs interrupted while the single-process prototype was running.
+        with self.db:
+            self.db.execute("""
+                UPDATE understanding_jobs SET status='pending',updated_at=?
+                WHERE status='running'
+            """, (_now(),))
+
     @staticmethod
     def is_urgent(text: str) -> bool:
         lowered = text.casefold()
