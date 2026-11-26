@@ -1137,18 +1137,27 @@ class PersonalUnderstanding:
         if not eligible and not stale:
             return ()
         pending=eligible[0] if eligible else None
-        # Expire only proposals in the same conversation whose first following
-        # turn has already passed. Other conversations remain independent.
+        # Serialize confirmation resolution with BEGIN IMMEDIATE. The API
+        # request and the background worker can discover the same pending
+        # confirmation at nearly the same time; only one may revise the claim.
         with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
             for row in stale + eligible[1:]:
                 self.db.execute("""
                     UPDATE understanding_pending_confirmations
-                    SET status='expired',resolved_at=? WHERE id=?
+                    SET status='expired',resolved_at=?
+                    WHERE id=? AND status='pending'
                 """,(_now(),row[0]))
-        if pending is None:
-            return ()
-        kind=self._confirmation_kind(text)
-        with self.db:
+            if pending is None:
+                return ()
+            current_pending=self.db.execute("""
+                SELECT status,claim_version_id
+                FROM understanding_pending_confirmations WHERE id=?
+            """,(pending[0],)).fetchone()
+            if (current_pending is None or current_pending[0] != "pending"
+                    or current_pending[1] != pending[2]):
+                return ()
+            kind=self._confirmation_kind(text)
             version_row=self.db.execute(
                 "SELECT version FROM understanding_claim_versions WHERE id=?",(pending[2],)
             ).fetchone()
@@ -1158,7 +1167,9 @@ class PersonalUnderstanding:
             if (kind is None or version_row is None or current_claim is None
                     or pending[4]!=version_row[0] or current_claim[0]!=pending[4]):
                 self.db.execute("""
-                    UPDATE understanding_pending_confirmations SET status='expired',resolved_at=? WHERE id=?
+                    UPDATE understanding_pending_confirmations
+                    SET status='expired',resolved_at=?
+                    WHERE id=? AND status='pending'
                 """,(_now(),pending[0]))
                 return ()
             source=self.db.execute(
@@ -1166,7 +1177,9 @@ class PersonalUnderstanding:
             ).fetchone()
             if source is None or len(text)>MAX_QUOTE or SECRET.search(text) or SENSITIVE.search(text):
                 self.db.execute("""
-                    UPDATE understanding_pending_confirmations SET status='expired',resolved_at=? WHERE id=?
+                    UPDATE understanding_pending_confirmations
+                    SET status='expired',resolved_at=?
+                    WHERE id=? AND status='pending'
                 """,(_now(),pending[0]))
                 return ()
             self.db.execute("""
@@ -1216,9 +1229,12 @@ class PersonalUnderstanding:
             self.db.execute("""
                 INSERT INTO understanding_revision_evidence(revision_id,evidence_id) VALUES(?,?)
             """,(revision.lastrowid,evidence[0]))
-            self.db.execute("""
-                UPDATE understanding_pending_confirmations SET status=?,resolved_at=? WHERE id=?
+            updated=self.db.execute("""
+                UPDATE understanding_pending_confirmations
+                SET status=?,resolved_at=? WHERE id=? AND status='pending'
             """,(kind,now,pending[0]))
+            if updated.rowcount != 1:
+                raise ValueError("confirmation changed during resolution")
         return (claim_id,)
 
     def resolve_deferred_confirmations(self) -> tuple[str,...]:
