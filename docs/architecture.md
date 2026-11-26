@@ -52,3 +52,17 @@ flowchart LR
 ## 后续验收状态
 
 长期记忆与动态个人理解均为可选扩展。功能测试通过仅证明本地流程、来源和数据约束符合测试；真实模型纵向质量仍须通过显式 Live 测试并人工审查，不以 CI 通过代替效果验收。
+
+
+## API First 服务层（产品化 V1）
+
+当前产品化方向不先开发 Web 页面。FastAPI/Uvicorn 服务通过 `becoming-api` 启动，默认只监听 loopback；Electron 客户端后续复用同一套 JSON API。
+
+- `becoming/api.py`：版本化路由、Pydantic 请求校验、统一错误响应、request ID。
+- `becoming/api_runtime.py`：单用户运行时、模型配置、会话 Agent 装配和 SQLite 生命周期。
+- `becoming/memory.py`：新增 conversations 表及 turns.conversation_id 迁移；旧 CLI turns 归入 default 会话，近期上下文按会话隔离。
+- `docs/api-v1.md`：路由契约、启动方式、安全边界和 GitHub HTTP 联调说明。
+
+当前 API 已覆盖健康检查、模型配置/连接测试、会话 CRUD、消息发送、成长预览/确认、长期记忆查看/遗忘、个人理解查看、数据导出和全量清除。GitHub Actions 会启动真实 loopback HTTP 服务，使用本地兼容模型 stub 和临时 SQLite 数据执行接口级联调。
+
+**当前限制**：API 是本地单用户同步服务；Agent.reply() 仍会在主回复后同步执行长期记忆提取及个人理解处理，尚未切换到持久化后台 worker。token streaming、可靠取消、多用户认证、远程部署安全和系统密钥库接入均未实现。模型密钥通过 API 更新时只保存在进程内存；未来 Electron Main 负责系统安全存储与启动时注入。当前阶段不做 Web/Electron 页面。
