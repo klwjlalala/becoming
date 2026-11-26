@@ -361,12 +361,13 @@ class PersonalUnderstanding:
     """SQLite-backed personal understanding sharing the transcript connection."""
     def __init__(
         self, store: SQLiteConversationStore, model: Model, *,
-        recover_running_jobs: bool = True,
+        recover_running_jobs: bool = True, initialize_schema: bool = True,
     ):
         self.store, self.model, self.db = store, model, store.connection
         self.last_search = None
         self.last_event = UnderstandingEvent()
-        self._ensure_schema(recover_running_jobs=recover_running_jobs)
+        if initialize_schema:
+            self._ensure_schema(recover_running_jobs=recover_running_jobs)
 
     def _ensure_schema(self, *, recover_running_jobs: bool = True):
         with self.db:
