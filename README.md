@@ -6,7 +6,7 @@
 
 ## 快速启动
 
-需要 Python 3.11+，运行时仅依赖标准库。
+需要 Python 3.11+。CLI 核心可直接使用标准库；HTTP API 需要安装 FastAPI/Uvicorn。
 
 ```bash
 git clone https://github.com/klwjlalala/becoming.git
@@ -24,6 +24,31 @@ Demo 为固定的模拟模型，不具有真实 AI 理解能力，也不会发�
 ## 统一服务入口（成长辅助）
 
 `python -m becoming --growth --long-memory --comprehensive-memory --personal-understanding` 可在同一对话入口组合长期记忆、动态个人理解、自我探索引导与成长工具。成长数据默认存于 `data/growth.sqlite3`，对话及长期记忆存于 `data/conversations.sqlite3`，可分别用 `--db` 和 `--growth-db` 指定，两个文件不能相同。`/confirm <token>` 确认变更，`/cancel` 取消，`/clear-growth` 后按提示二次确认清除成长记录。`/clear` 只清除对话及关联长期记忆，不删除独立成长记录。删除成长记录不会清除对话或长期记忆中的副本；删除对话也不会删除成长记录。SQLite 逻辑删除不保证物理擦除。
+
+## 无页面后端 API（API First）
+
+当前产品化阶段先不开发 Web/Electron 页面，直接运行独立 HTTP 服务，后续 Electron 桌面端复用同一套 API。
+
+```bash
+python -m pip install -e .
+BECOMING_DEMO=1 becoming-api
+```
+
+默认只监听 `127.0.0.1:8765`：
+
+- Health: http://127.0.0.1:8765/api/v1/health
+- Swagger 联调文档: http://127.0.0.1:8765/docs
+- OpenAPI Schema: http://127.0.0.1:8765/openapi.json
+
+Windows PowerShell:
+
+```powershell
+python -m pip install -e .
+$env:BECOMING_DEMO="1"
+becoming-api
+```
+
+真实模型可通过环境变量注入，也可调用 `PUT /api/v1/model/config` 在当前进程内配置。API 不提供读取密钥的接口；HTTP 配置的密钥只保存在进程内存，重启后需重新注入。后续 Electron Main 应使用系统安全存储保存密钥。当前服务只面向本机单用户，不要绑定公网。完整路由、请求示例和 GitHub Actions 联调方式见 [HTTP API V1](docs/api-v1.md)。
 
 ## 接入真实模型
 
@@ -45,7 +70,7 @@ PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前
 - becoming/models.py：可替换模型接口、模拟模型、OpenAI-compatible 适配器
 - becoming/memory.py：原始对话持久化（不是长期语义记忆）
 - becoming/prompts.py：基础角色提示词
-- becoming/__main__.py：命令行入口
+- becoming/__main__.py：命令行入口\n- becoming/api.py：版本化 FastAPI HTTP 接口\n- becoming/api_runtime.py：单用户服务运行时与 Agent 装配
 - docs/architecture.md：当前设计与后续研究边界
 - tests/：确定性功能测试及真实模型显式能力调用集成测试
 - evaluation/：智能体效果评测（最小框架）
@@ -58,7 +83,7 @@ PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前
 - 效果评测：`python -m evaluation`，离线列出通用用例；`python -m evaluation.personal_understanding` 校验 30 轮个人理解场景。
 - 真实模型个人理解集成：`python -m unittest discover -s tests -p 'live_personal_understanding.py' -v`，仅显式执行。
 - 30 轮纵向评测：`python -m evaluation.personal_understanding --live --max-calls 80 --output artifacts/personal-understanding-live.json`，需人工审查，不自动评分。
-- 真实 API 功能冒烟测试仍通过手动 Actions 运行，详见 [测试说明](docs/testing.md)。
+- API HTTP 联调测试随默认 CI 运行：启动真实 loopback 服务并通过 HTTP 请求验证会话、聊天、成长变更和数据清除。\n- 真实模型效果/功能测试仍通过手动 Actions 运行，详见 [测试说明](docs/testing.md)。
 
 ## 开发原则
 
