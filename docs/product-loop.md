@@ -6,11 +6,11 @@
 
 ## 单一运行入口
 
-    python -m becoming --growth --long-memory --comprehensive-memory
+    python -m becoming --growth --long-memory --comprehensive-memory --personal-understanding
 
 兼容现有环境变量 BECOMING_BASE_URL、BECOMING_API_KEY、BECOMING_MODEL。对话及长期记忆使用 data/conversations.sqlite3；成长目标、行动和复盘使用 data/growth.sqlite3。可分别通过 --db、--growth-db 指定，禁止两个文件指向同一路径。旧 growth_cli 保留兼容，但统一入口优先。
 
-普通对话沿用原 Agent；启用 --growth 后由 GrowthAgent 组合成长工具与可选长期记忆。记忆提取/检索使用原始模型适配器，不经过成长工具协议。成长变更需要本地一次性确认；nonce 只附加在 CLI 返回文本，不进入模型上下文或对话历史。确认、取消及被新消息作废的提案会形成普通对话事件，便于后续理解上下文。
+普通对话沿用原 Agent；启用 --growth 后由 GrowthAgent 组合成长工具与可选长期记忆、动态个人理解。长期记忆与个人理解共享对话数据库但使用独立数据表：前者保存用户明确表达的原始事实/经历，后者形成有证据、可修订的理解命题。两者的提取/检索均使用原始模型适配器，不经过成长工具协议；个人理解默认关闭，需显式添加 --personal-understanding。成长变更需要本地一次性确认；nonce 只附加在 CLI 返回文本，不进入模型上下文或对话历史。确认、取消及被新消息作废的提案会形成普通对话事件，便于后续理解上下文。
 
 查询工具把实际数据库结果传回模型，由模型自然总结。成功时不再把原始 JSON 强行拼接到回复；实际结构化结果保留在工具事件。读取失败时如实降级。
 
@@ -38,7 +38,7 @@
 
 service-001 覆盖明确记忆、跨轮召回、成长目标、行动、完成、复盘及再次总结。评测端的 --approve-proposals 只在虚构测试中显式批准模型提案，不代表产品自动批准。service-002 检查倾诉和普通技术请求不会误触发成长写入。报告记录模型实际工具事件、记忆事件及最终数据库状态，所有效果结论仍需人工审阅。
 
-离线测试使用脚本模型验证真实代码路径；真实模型用例不由 CI 自动执行，不自动消耗额度。一次成功的工具调用不代表长期理解质量已经通过。
+离线测试使用脚本模型验证真实代码路径；tests/test_service_loop.py 覆盖长期记忆、动态个人理解和成长工具同时启用的组合路径，tests/test_cli.py 覆盖统一入口的全部可选模块启动。真实模型用例不由 CI 自动执行，不自动消耗额度。一次成功的工具调用不代表长期理解质量已经通过。
 
 ## 本阶段明确不做
 
