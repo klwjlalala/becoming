@@ -181,6 +181,17 @@ class BackgroundWorker:
         if row is None:
             self._finish(job["id"], "cancelled", error="source_turn_missing")
             return
+        if job["kind"] == "long_memory.extract" and self.long_memory is None:
+            self._finish(job["id"], "cancelled", error="feature_disabled")
+            return
+        if (job["kind"] == "personal_understanding.process"
+                and self.personal_understanding is None):
+            self._finish(job["id"], "cancelled", error="feature_disabled")
+            return
+        if job["kind"] not in {
+            "long_memory.extract", "personal_understanding.process"
+        }:
+            raise RuntimeError("unknown_background_job")
         model = self.model_provider()
         if model is None:
             raise RuntimeError("model_not_configured")
@@ -188,26 +199,22 @@ class BackgroundWorker:
         turn_id = job["source_turn_id"]
         user_text, assistant_text = row
         if job["kind"] == "long_memory.extract":
-            if self.long_memory is not None:
-                self.long_memory.model = model
-                self.long_memory.extract(turn_id, user_text)
-        elif job["kind"] == "personal_understanding.process":
-            if self.personal_understanding is not None:
-                manager = self.personal_understanding
-                manager.model = model
-                manager.observe_turn(
-                    turn_id, user_text, assistant_text, process=False
-                )
-                event = manager.process_pending(limit=5, retry_failed=True)
-                manager.resolve_deferred_confirmations()
-                internal = self.db.execute("""
-                    SELECT status,attempts FROM understanding_jobs
-                    WHERE job_key=?
-                """, (f"turn:{turn_id}",)).fetchone()
-                if event.errors or (internal and internal[0] != "done"):
-                    raise RuntimeError("personal_understanding_update_failed")
+            self.long_memory.model = model
+            self.long_memory.extract(turn_id, user_text)
         else:
-            raise RuntimeError("unknown_background_job")
+            manager = self.personal_understanding
+            manager.model = model
+            manager.observe_turn(
+                turn_id, user_text, assistant_text, process=False
+            )
+            event = manager.process_pending(limit=5, retry_failed=True)
+            manager.resolve_deferred_confirmations()
+            internal = self.db.execute("""
+                SELECT status,attempts FROM understanding_jobs
+                WHERE job_key=?
+            """, (f"turn:{turn_id}",)).fetchone()
+            if event.errors or (internal and internal[0] != "done"):
+                raise RuntimeError("personal_understanding_update_failed")
         self._finish(job["id"], "done")
 
     def run_once(self) -> bool:
