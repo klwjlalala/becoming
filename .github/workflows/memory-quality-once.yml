@@ -15,9 +15,15 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/feat/long-term-memory-v1' &&
-      github.event.head_commit.message == 'run authorized memory quality-001 once 2026-11-26'
+      github.event.head_commit.message == 'run authorized memory quality-002 and quality-003 once 2026-11-26'
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        case: [quality-002, quality-003]
+    name: Real-model evaluation ${{ matrix.case }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,11 +35,12 @@ jobs:
         run: |
           python -m unittest discover -s tests -v
           python -m evaluation.memory_quality
-      - name: Run one explicitly authorized real-model scenario
+      - name: Run authorized real-model scenario
         env:
           BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
           BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
           BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
+          QUALITY_CASE: ${{ matrix.case }}
         run: |
           set -eu
           for key in BECOMING_BASE_URL BECOMING_API_KEY BECOMING_MODEL; do
@@ -45,5 +52,5 @@ jobs:
           marker=$(python -c 'import uuid; print(uuid.uuid4())')
           echo "::stop-commands::$marker"
           trap 'echo "::$marker::"' EXIT
-          python -m evaluation.memory_quality --live --case quality-001 --output quality-001.json
-          cat quality-001.json
+          python -m evaluation.memory_quality --live --case "$QUALITY_CASE" --output "$QUALITY_CASE.json"
+          cat "$QUALITY_CASE.json"
