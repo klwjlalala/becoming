@@ -409,6 +409,12 @@ class PersonalUnderstandingTests(unittest.TestCase):
         self.assertEqual(engine._confirmation_kind("对，我认可这个理解。"), "confirmed")
         self.assertEqual(engine._confirmation_kind("不是，我的意思不同。"), "rejected")
 
+
+    def test_urgent_trigger_distinguishes_personal_correction_from_code_edit(self):
+        self.assertFalse(PersonalUnderstanding.is_urgent("更正一下这段 Python 代码。"))
+        self.assertTrue(PersonalUnderstanding.is_urgent("更正一下：我更在意自主安排时间。"))
+        self.assertTrue(PersonalUnderstanding.is_urgent("请更新你对我的理解：我不再把创业当成人生目标。"))
+
     def test_store_mismatch_and_invalid_limits(self):
         other = SQLiteConversationStore(":memory:")
         self.addCleanup(other.close)
