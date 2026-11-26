@@ -1,0 +1,46 @@
+name: Live model smoke test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-model-smoke
+  cancel-in-progress: false
+
+jobs:
+  offline:
+    name: Offline regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run offline tests
+        run: python -m unittest discover -s tests -v
+
+  live:
+    name: Live model conversation and restart
+    needs: offline
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run live model smoke test
+        env:
+          BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
+          BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
+          BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
+        run: python -m unittest discover -s tests -p live_smoke.py -v
