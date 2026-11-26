@@ -415,6 +415,40 @@ class PersonalUnderstandingTests(unittest.TestCase):
         self.assertTrue(PersonalUnderstanding.is_urgent("更正一下：我更在意自主安排时间。"))
         self.assertTrue(PersonalUnderstanding.is_urgent("请更新你对我的理解：我不再把创业当成人生目标。"))
 
+
+    def test_deleting_new_evidence_restores_previous_supported_version(self):
+        engine, model = self.make_engine(create_proposal())
+        claim = self.create_claim(engine, model)
+        quote = "和熟悉的人围绕共同兴趣交流，我会觉得很自在。"
+        model.outputs.append(json.dumps({
+            "evidence": [{
+                "ref": "e1", "turn_index": 0, "quote": quote,
+                "kind": "self_interpretation", "event_time": None,
+            }],
+            "operations": [{
+                "operation": "REFINE", "claim_ref": None, "claim_id": claim.id,
+                "expected_version": 1,
+                "content": "用户重视自主安排时间，也偏好围绕共同兴趣进行深入交流。",
+                "dimension": "patterns", "basis": "self_interpretation",
+                "scope": {"social_context": "熟悉的人、共同兴趣"},
+                "temporal_scope": "ongoing",
+                "evidence": [{"ref": "e1", "relation": "qualifies"}],
+                "reason": "新证据补充了适用情境。",
+            }],
+            "confirmation": None,
+        }, ensure_ascii=False))
+        newer_turn = self.store.append_turn(quote, "明白。")
+        engine._enqueue(newer_turn, "normal")
+        engine.process_pending()
+        self.assertEqual(engine.list_claims()[0].version, 2)
+        with self.store.connection:
+            self.store.connection.execute("DELETE FROM turns WHERE id=?", (newer_turn,))
+        restored, = engine.list_claims()
+        self.assertEqual(restored.id, claim.id)
+        self.assertEqual(restored.version, 1)
+        self.assertEqual(restored.status, "active")
+        self.assertEqual(len(engine.get_claim_history(claim.id)), 1)
+
     def test_store_mismatch_and_invalid_limits(self):
         other = SQLiteConversationStore(":memory:")
         self.addCleanup(other.close)
