@@ -11,6 +11,8 @@ from dataclasses import asdict
 from becoming.agent import Agent
 from becoming.long_memory import LongMemory
 from becoming.memory_search import ComprehensiveMemory
+from becoming.memory_improved import ImprovedMemory
+from becoming.embeddings import OpenAICompatibleEmbedder
 from becoming.memory import SQLiteConversationStore
 from becoming.models import ModelError, OpenAICompatibleModel
 from evaluation.quality_cases import validate_cases
@@ -89,11 +91,11 @@ def probe_audit(case, evidence, event):
     return details
 
 
-def run_case(case, model, *, progress=None):
+def run_case(case, model, *, progress=None, improved=False, embedder=None):
     model = CountedModel(model)
     store = DatedStore(":memory:")
     try:
-        memory = ComprehensiveMemory(store, model)
+        memory = ImprovedMemory(store, model) if improved else ComprehensiveMemory(store, model)
         agent = Agent(model, store, history_turns=12, long_memory=memory)
         traces = []
         for turn in case.history:
@@ -110,19 +112,26 @@ def run_case(case, model, *, progress=None):
         evidence, noise = audit(case, traces, records)
         probes = {}
         # The history and stored records are identical for every probe; no cross-arm contamination.
-        for mode in ("no-memory", "v1.1", "v1.3"):
+        modes = ["no-memory", "v1.1", "v1.3"]
+        if improved:
+            modes.append("v1.4-scan")
+        if embedder is not None:
+            modes.append("v1.4-embedding")
+        for mode in modes:
             branch = DatedStore(":memory:")
             try:
                 store.connection.backup(branch.connection)
                 branch.day = case.query_day
                 mem = (None if mode == "no-memory" else
                        LongMemory(branch, model, semantic=True) if mode == "v1.1" else
-                       ComprehensiveMemory(branch, model))
+                       ComprehensiveMemory(branch, model) if mode == "v1.3" else
+                       ImprovedMemory(branch, model, embedder=embedder if mode == "v1.4-embedding" else None))
                 before = model.calls
                 probe = Agent(model, branch, history_turns=0, long_memory=mem)
                 reply = probe.reply(case.query)
                 event = probe.last_memory_event
                 probes[mode] = {"reply": reply, "event": asdict(event),
+                                "post_query_records": all_records(branch),
                                 "diagnostics": probe_audit(case, evidence, event),
                                 "model_calls": model.calls - before}
             finally:
@@ -131,7 +140,8 @@ def run_case(case, model, *, progress=None):
                 "exact_span_matched": sum(bool(v["matched_ids"]) for v in evidence.values()),
                 "expected_span_count": len(evidence), "unexpected_write_review": noise,
                 "query": case.query, "query_day": case.query_day, "probes": probes,
-                "model_calls": model.calls, "criteria": case.criteria,
+                "model_calls": model.calls, "embedding_calls": getattr(embedder, "calls", 0),
+                "history_mode": "v1.4" if improved else "v1.3", "criteria": case.criteria,
                 "verdict": "awaiting_manual_review"}
     finally:
         store.close()
@@ -142,10 +152,12 @@ def main():
     cases = validate_cases()
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--case", choices=cases)
+    parser.add_argument("--improved", action="store_true", help="Compare V1.4 scan on the same new history")
+    parser.add_argument("--embedding", action="store_true", help="Also compare configured embedding endpoint")
     parser.add_argument("--output", help="Optional JSON report file (fictional test data)")
     args = parser.parse_args()
     if not args.live:
-        if args.case or args.output:
+        if args.case or args.output or args.improved or args.embedding:
             parser.error("--case and --output require --live")
         for key, case in cases.items():
             print(f"{key}: {case.title}; {len(case.history)} history turns")
@@ -153,13 +165,19 @@ def main():
         return 0
     if not args.case:
         parser.error("--live requires --case")
+    if args.embedding and not args.improved:
+        parser.error("--embedding requires --improved")
     import sys
     from pathlib import Path
     try:
         model = OpenAICompatibleModel(os.environ.get("BECOMING_BASE_URL", ""),
                                       os.environ.get("BECOMING_API_KEY", ""),
                                       os.environ.get("BECOMING_MODEL", ""))
-        report = run_case(cases[args.case], model,
+        embedder = None
+        if args.embedding:
+            embedder = OpenAICompatibleEmbedder(os.environ.get("BECOMING_BASE_URL", ""),
+                os.environ.get("BECOMING_API_KEY", ""), os.environ.get("BECOMING_EMBEDDING_MODEL", ""))
+        report = run_case(cases[args.case], model, improved=args.improved, embedder=embedder,
                           progress=lambda n, total: print(f"History {n}/{total}", file=sys.stderr))
         payload = json.dumps(report, ensure_ascii=False, indent=2)
         if args.output:

@@ -105,10 +105,8 @@ def candidate_pool(items: list[Memory], topics: tuple[str, ...], limit: int = SE
 class ComprehensiveMemory(LongMemory):
     """Preserves existing write/forget contracts; changes only opt-in retrieval."""
 
-    def search(self, plan: SearchPlan, limit: int = SEMANTIC_POOL) -> list[Memory]:
-        if type(limit) is not int or not 0 <= limit <= SEMANTIC_POOL:
-            raise ValueError("invalid search limit")
-        if not limit or not (plan.topics or plan.start or plan.end):
+    def eligible(self, plan: SearchPlan) -> list[Memory]:
+        if not (plan.topics or plan.start or plan.end):
             return []
         where, args = [], []
         if not plan.include_history:
@@ -123,25 +121,24 @@ class ComprehensiveMemory(LongMemory):
                  FROM long_memories m JOIN turns t ON t.id=m.source_turn_id"""
         if where:
             sql += " WHERE " + " AND ".join(where)
-        items = self.safe_records(self.db.execute(sql, args))
-        return candidate_pool(items, plan.topics, limit)
+        return self.safe_records(self.db.execute(sql, args))
 
-    def retrieve(self, query: str, limit: int = 8) -> list[Memory]:
-        self.last_search = None
-        if type(limit) is not int or not 0 <= limit <= 10:
-            raise ValueError("invalid memory limit")
-        if not limit or not query.strip() or SECRET.search(query):
+    def search(self, plan: SearchPlan, limit: int = SEMANTIC_POOL) -> list[Memory]:
+        if type(limit) is not int or not 0 <= limit <= SEMANTIC_POOL:
+            raise ValueError("invalid search limit")
+        if not limit:
             return []
-        if not self.db.execute("SELECT 1 FROM long_memories LIMIT 1").fetchone():
-            return []
+        return candidate_pool(self.eligible(plan), plan.topics, limit)
+
+    def plan_query(self, query):
         raw = self.model.complete([
             {"role": "system", "content": PLAN_PROMPT},
             {"role": "user", "content": json.dumps({"query": query,
                 "today_utc": datetime.now(timezone.utc).date().isoformat()}, ensure_ascii=False)}
         ])
-        plan = SearchPlan.parse(raw)
-        pool = self.search(plan)
-        self.last_search = {"plan": asdict(plan), "candidate_ids": tuple(m.id for m in pool)}
+        return SearchPlan.parse(raw)
+
+    def rank(self, query, plan, pool, limit):
         if not pool:
             return []
         raw = self.model.complete([
@@ -153,3 +150,16 @@ class ComprehensiveMemory(LongMemory):
                 ]}, ensure_ascii=False)}
         ])
         return select_memories(raw, pool, limit)
+
+    def retrieve(self, query: str, limit: int = 8) -> list[Memory]:
+        self.last_search = None
+        if type(limit) is not int or not 0 <= limit <= 10:
+            raise ValueError("invalid memory limit")
+        if not limit or not query.strip() or SECRET.search(query):
+            return []
+        if not self.db.execute("SELECT 1 FROM long_memories LIMIT 1").fetchone():
+            return []
+        plan = self.plan_query(query)
+        pool = self.search(plan)
+        self.last_search = {"plan": asdict(plan), "candidate_ids": tuple(m.id for m in pool)}
+        return self.rank(query, plan, pool, limit)

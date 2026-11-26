@@ -247,6 +247,12 @@ class LongMemory:
               "source_turn_id": m.source_turn_id, "recorded_at_utc": m.recorded_at,
               "active": bool(m.active)} for m in items], ensure_ascii=False)
 
+    def extraction_prompt(self):
+        return EXTRACT_PROMPT
+
+    def validate_extracted_revision(self, candidate, user):
+        """Optional stricter revision policy; direct write retains explicit caller contract."""
+
     def extract(self, turn_id: int, user: str) -> tuple[int, ...]:
         self.last_extract_rejected = 0
         # No backfill or assistant output. Bound the extraction request and slot hints.
@@ -264,7 +270,7 @@ class LongMemory:
         hints = [{"id": m.id, "key": m.key, "category": m.category, "quote": m.quote}
                  for m in active[:30]]
         raw = self.model.complete([
-            {"role": "system", "content": EXTRACT_PROMPT},
+            {"role": "system", "content": self.extraction_prompt()},
             {"role": "user", "content": json.dumps(
                 {"current_user_message": user, "existing_slots": hints,
                  "blocked_keys": self.blocked_keys()[:100]},
@@ -298,6 +304,7 @@ class LongMemory:
             for candidate in unique:
                 self.db.execute("SAVEPOINT memory_item")
                 try:
+                    self.validate_extracted_revision(candidate, user)
                     ids.extend(self._write_checked([candidate], turn_id))
                 except ValueError:
                     self.db.execute("ROLLBACK TO memory_item")

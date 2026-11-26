@@ -83,3 +83,11 @@ PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前
 
 
 V1.3 增加来源分句校验、单轮最多12条记忆、独立提取失败隔离，以及综合检索的时间分层候选。运行方式不变；真实模型准确率与召回净收益尚待验证。
+
+
+### V1.4 实验模式
+
+    python -m becoming --long-memory --comprehensive-memory --improved-memory
+    python -m evaluation.memory_quality --live --improved --case quality-003
+
+可另设置 BECOMING_EMBEDDING_MODEL 并启用 --embedding-memory（CLI）或 --embedding（评测）来比较配置服务的向量接口。无该配置不要开启。分批扫描有额外调用成本；向量实验不代表已验证效果。

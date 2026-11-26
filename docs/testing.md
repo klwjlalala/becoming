@@ -116,3 +116,8 @@
 ## V1.3 验收
 
 tests/test_memory_safety.py 覆盖分句/限定边界、旧记录再校验、独立有效项保留、重复槽位冲突及不把同轮已忘记信息扩展到保留记忆；tests/test_memory_quality.py 将原先三条上限和最旧零匹配记录缺失复现改为回归验收。tests/live_memory_safety.py 为真实模型显式五条记忆提取测试（未默认执行）。质量诊断对照组标签更新为 v1.3；v1.1 是当前代码的语义检索模式，并不冻结旧提取实现，不是严格历史版本 A/B。若比较历史版本，需在各提交使用相同虚构语料分别执行并人工审查。
+
+
+## V1.4 实验验收
+
+`tests/test_memory_improved.py`：50条分批候选覆盖、160条边界、无效 ID 降级、补充与纠正、拒绝不明确替换、向量协议及失败回退。新增显式真实模型集成测试 live_memory_improved.py（非默认执行）。运行 `python -m evaluation.memory_quality --live --improved --case quality-003`，同一 V1.4 提取历史对照无记忆、V1.1、V1.3、V1.4 scan，报告额外记录咨询后的存储状态。添加 `--embedding` 并配置 BECOMING_EMBEDDING_MODEL 才尝试向量组，若 trace 显示回退不能视为向量实验成功。旧质量测试默认不变；不同历史提取版本仍需分别比较。真实模型测试仅显式授权执行。
