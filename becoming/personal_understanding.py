@@ -664,6 +664,20 @@ class PersonalUnderstanding:
         ranked.sort(key=lambda row:(row[0],row[1]),reverse=True)
         return [row[2] for row in ranked if row[0]>0][:limit]
 
+    @staticmethod
+    def _retrieval_suppression_reason(query: str) -> str | None:
+        if any(cue in query for cue in LISTEN_ONLY_CUES):
+            return "listen_only"
+        if (any(cue in query for cue in THIRD_PARTY_ONLY_CUES)
+                and not any(cue in query for cue in (
+                    "我自己", "我也", "我为什么", "我感到", "让我", "对我来说"
+                ))):
+            return "third_party_only"
+        if (any(cue in query for cue in TRANSIENT_MOOD_CUES)
+                and not any(cue in query for cue in PERSONAL_QUERY_CUES)):
+            return "transient_mood"
+        return None
+
     def retrieve(self, query: str, limit: int = 7) -> list[Claim]:
         self.last_search = None
         if not isinstance(query,str) or not query.strip():
@@ -671,6 +685,15 @@ class PersonalUnderstanding:
         if not 0 <= limit <= 7:
             raise ValueError("understanding retrieval limit must be between 0 and 7")
         if limit == 0:
+            return []
+        suppression = self._retrieval_suppression_reason(query)
+        if suppression:
+            self.last_search = {
+                "candidate_ids":[],
+                "selected_ids":[],
+                "query_mode":"suppressed",
+                "suppression_reason":suppression,
+            }
             return []
         candidates = self.list_claims(limit=100)
         selected = self._rank_claims(query,candidates,limit)
