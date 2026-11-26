@@ -10,6 +10,7 @@ from pathlib import Path
 
 from becoming.agent import Agent
 from becoming.memory import SQLiteConversationStore
+from becoming.long_memory import LongMemory
 from becoming.models import ModelError, OpenAICompatibleModel
 
 
@@ -25,6 +26,8 @@ def load_cases():
         if case["id"] in seen:
             raise ValueError("Duplicate case id")
         seen.add(case["id"])
+        if "long_memory" in case and not isinstance(case["long_memory"], bool):
+            raise ValueError("Invalid long_memory flag")
         for key in ("turns", "criteria"):
             values = case.get(key)
             if not isinstance(values, list) or not values or not all(
@@ -58,11 +61,16 @@ def main():
         )
         store = SQLiteConversationStore(":memory:")
         try:
-            agent = Agent(model, store)
+            memory = LongMemory(store, model) if case.get("long_memory") else None
+            agent = Agent(model, store, history_turns=0 if memory else 12, long_memory=memory)
             print(f"Case: {case['id']} {case['title']}")
             for turn in case["turns"]:
                 print("User:", turn)
                 print("Agent:", agent.reply(turn))
+                if memory is not None:
+                    print("Memory event:", agent.last_memory_event)
+            if memory is not None:
+                print("Active memories:", memory.list_active())
             print("Manual review criteria:")
             for criterion in case["criteria"]:
                 print("-", criterion)

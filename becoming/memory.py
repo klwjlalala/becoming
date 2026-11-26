@@ -9,7 +9,7 @@ from .models import Message
 
 class ConversationStore(Protocol):
     def recent(self, limit: int) -> list[Message]: ...
-    def append_turn(self, user: str, assistant: str) -> None: ...
+    def append_turn(self, user: str, assistant: str) -> int: ...
 
 
 class SQLiteConversationStore:
@@ -17,6 +17,7 @@ class SQLiteConversationStore:
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(str(path))
+        self.connection.execute("PRAGMA foreign_keys=ON")
         with self.connection:
             self.connection.execute("""
                 CREATE TABLE IF NOT EXISTS turns (
@@ -40,12 +41,13 @@ class SQLiteConversationStore:
                              {"role": "assistant", "content": assistant}])
         return messages
 
-    def append_turn(self, user: str, assistant: str) -> None:
+    def append_turn(self, user: str, assistant: str) -> int:
         with self.connection:
-            self.connection.execute(
+            cursor = self.connection.execute(
                 "INSERT INTO turns (user_text, assistant_text) VALUES (?, ?)",
                 (user, assistant),
             )
+            return cursor.lastrowid
 
     def clear(self) -> None:
         with self.connection:
