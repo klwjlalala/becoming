@@ -41,7 +41,6 @@ Evidence 只描述用户在某个时间表达过的内容，不把模型解释�
 | quote | 从该轮用户输入中逐字截取的完整语义片段 |
 | kind | direct_statement / self_interpretation / correction / experience / outcome_feedback / context |
 | event_time | 用户明确提供的事件时间；未知时为空 |
-| recorded_at | 系统记录时间 |
 | recorded_at | 来源对话轮次的记录时间 |
 
 约束：
