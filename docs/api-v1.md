@@ -47,6 +47,8 @@ API 不提供读取密钥的接口。运行时通过 HTTP 配置的 API Key 只�
 |---|---|---|
 | GET | /health | 服务及数据库健康状态 |
 | GET | /capabilities | 当前启用的能力 |
+| GET | /background/status | 后台 worker 状态及任务计数 |
+| GET | /background/jobs | 查询后台任务状态 |
 | GET/PUT | /model/config | 查看安全配置摘要 / 更新运行时模型 |
 | POST | /model/test | 测试模型连接 |
 | GET/POST | /conversations | 列出 / 创建会话 |
@@ -67,6 +69,27 @@ API 不提供读取密钥的接口。运行时通过 HTTP 配置的 API Key 只�
 | GET | /data/export | 导出当前本地业务数据 |
 | POST | /data/clear | 生成全量清除预览 |
 | POST | /data/clear/confirm | 二次确认清除 |
+
+## 后台任务
+
+HTTP API 模式下，消息回复完成后，长期记忆提取和动态个人理解更新不在请求线程中执行。服务在写入对话轮次的同一个 SQLite 事务中创建对应任务，避免出现“对话已保存但任务没有入队”的窗口。
+
+- worker 使用独立 SQLite 连接，不持有 API runtime 锁执行模型调用；持久化数据库使用 WAL 和 busy timeout。
+- `long_memory.extract` 按来源轮次生成唯一任务，并用 `long_memory_extraction_receipts` 防止重启后重复提取或重复写入。
+- `personal_understanding.process` 复用既有 `understanding_jobs` 批处理队列；命题写入与内部任务完成状态在同一事务提交，避免崩溃后重复应用同一修订。
+- 任务有 `pending/running/done/failed/cancelled` 状态，最多尝试 3 次；临时失败采用延迟重试，进程启动时将中断的 `running` 任务恢复为 `pending`。
+- 用户确认个人理解的回复如果先于后台提取到达，worker 会在创建确认问题后检查同一会话的下一轮消息并补做确认；不同会话的待确认状态互不影响。
+- 删除来源对话或清除全部数据时，外键级联删除尚存的来源任务。
+
+查询：
+
+    GET /api/v1/background/status
+    GET /api/v1/background/jobs?limit=50
+    GET /api/v1/background/jobs?source_turn_id=123
+
+任务状态只表示本地处理结果，不代表模型对用户的理解一定正确。`failed` 任务需要在客户端提示用户后台整理未完成；不能把 `pending/running` 描述成已经保存。显式要求记住的信息在任务完成前，助手会说明仍在后台整理。
+
+当前 worker 是单进程单 worker，不支持多进程竞争消费；模型调用仍是同步请求，但与主聊天请求解耦。CLI 入口保留原来的同步/批处理行为；此后台 worker 只由 HTTP API 服务生命周期管理。
 
 ### 对话请求
 
@@ -132,8 +155,8 @@ POST /api/v1/conversations/{id}/messages
 1. 安装 FastAPI/Uvicorn。
 2. 运行原有确定性功能测试。
 3. 启动独立的 loopback API 进程，使用临时 SQLite 文件和 DemoModel。
-4. 通过 Python 标准库 HTTP 客户端执行健康检查、会话隔离、聊天、成长预览/确认、数据导出和全量清除。
+4. 启动持久化后台 worker，并通过 Python 标准库 HTTP 客户端执行健康检查、会话隔离、聊天、成长预览/确认、后台任务状态、数据导出和全量清除。
 
 该流程在 GitHub runner 内部完成，不需要公网部署或 UI。真实模型 API 测试使用独立手动工作流 `API live HTTP smoke (manual)`（`.github/workflows/api-live-smoke.yml`）、仓库 Secrets 和虚构测试数据；该用例只进行模型连接测试与一次真实对话请求，默认 CI 不消耗真实模型额度。
 
-当前服务为单用户、本地、同步请求模型。它尚未提供账号认证、多租户隔离、远程部署安全、token streaming 或可取消的底层模型请求。不要把它作为公网服务部署。
+当前服务为单用户、本地服务；主聊天模型调用仍同步，记忆整理任务在后台执行。它尚未提供账号认证、多租户隔离、远程部署安全、token streaming 或可取消的底层模型请求。不要把它作为公网服务部署。
