@@ -1105,6 +1105,7 @@ class PersonalUnderstanding:
             WHERE p.status='pending' ORDER BY p.id DESC
         """).fetchall()
         eligible=[]
+        stale=[]
         for row in pending_rows:
             next_turn=self.db.execute("""
                 SELECT MIN(id) FROM turns
@@ -1114,17 +1115,21 @@ class PersonalUnderstanding:
             """,(row[3],row[3])).fetchone()[0]
             if next_turn == current_turn_id:
                 eligible.append(row)
-        if not eligible:
+            elif next_turn is not None and next_turn < current_turn_id:
+                stale.append(row)
+        if not eligible and not stale:
             return ()
-        pending=eligible[0]
-        # Only expire proposals whose immediate next turn is this one.
-        # Pending confirmations in other conversations remain independent.
+        pending=eligible[0] if eligible else None
+        # Expire only proposals in the same conversation whose first following
+        # turn has already passed. Other conversations remain independent.
         with self.db:
-            for row in eligible[1:]:
+            for row in stale + eligible[1:]:
                 self.db.execute("""
                     UPDATE understanding_pending_confirmations
                     SET status='expired',resolved_at=? WHERE id=?
                 """,(_now(),row[0]))
+        if pending is None:
+            return ()
         kind=self._confirmation_kind(text)
         with self.db:
             version_row=self.db.execute(
