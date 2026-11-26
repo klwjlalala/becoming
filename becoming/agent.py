@@ -37,7 +37,7 @@ class Agent:
         self.last_memory_event = MemoryEvent()
         self.last_understanding_event = UnderstandingEvent()
 
-    def reply(self, text: str) -> str:
+    def reply(self, text: str, *, defer_post_turn: bool = False) -> str:
         text = text.strip()
         if not text:
             raise ValueError("Input cannot be empty")
@@ -71,40 +71,72 @@ class Agent:
         if not isinstance(reply, str) or not reply.strip():
             raise ModelError("Model returned no text")
         reply = reply.strip()
-        # Store completed turns atomically; failed requests do not create orphan turns.
-        turn_id = self.store.append_turn(text, reply)
+        # In API mode, persist the turn and its post-turn jobs in one SQLite
+        # transaction. The CLI keeps its original synchronous behavior.
+        job_specs = []
+        if defer_post_turn:
+            if self.long_memory is not None:
+                job_specs.append(("long_memory.extract", 0))
+            if self.personal_understanding is not None:
+                priority = 10 if PersonalUnderstanding.is_urgent(text) else 0
+                job_specs.append(("personal_understanding.process", priority))
+        turn_id = self.store.append_turn(
+            text, reply, background_jobs=tuple(job_specs)
+        )
         written = ()
-        if self.long_memory is not None:
-            try:
-                written = self.long_memory.extract(turn_id, text)
-                if self.long_memory.last_extract_rejected:
-                    errors.append("extract_partial")
-            except (ModelError, sqlite3.Error, ValueError):
-                errors.append("extract_failed")
         confirmed = ()
         understanding_written = ()
         queued = ()
         processed = ()
-        if self.personal_understanding is not None:
+        memory_queued = ()
+        understanding_queued = ()
+        if defer_post_turn:
+            jobs = self.store.list_background_jobs(source_turn_id=turn_id)
+            by_kind = {job["kind"]: job["id"] for job in jobs}
+            if self.long_memory is not None:
+                memory_queued = (by_kind["long_memory.extract"],)
+            if self.personal_understanding is not None:
+                understanding_queued = (by_kind["personal_understanding.process"],)
+                try:
+                    confirmed = self.personal_understanding.resolve_pending_confirmation(
+                        text, turn_id
+                    )
+                except (sqlite3.Error, ValueError):
+                    understanding_errors.append("confirmation_failed")
+        else:
+            if self.long_memory is not None:
+                try:
+                    written = self.long_memory.extract(turn_id, text)
+                    if self.long_memory.last_extract_rejected:
+                        errors.append("extract_partial")
+                except (ModelError, sqlite3.Error, ValueError):
+                    errors.append("extract_failed")
+            if self.personal_understanding is not None:
+                try:
+                    confirmed = self.personal_understanding.resolve_pending_confirmation(text, turn_id)
+                except (sqlite3.Error, ValueError):
+                    understanding_errors.append("confirmation_failed")
+                try:
+                    event = self.personal_understanding.observe_turn(turn_id, text, reply)
+                    understanding_written = event.written_claim_ids
+                    queued = event.queued_job_ids
+                    processed = event.processed_job_ids
+                    understanding_errors.extend(event.errors)
+                except (ModelError, sqlite3.Error, ValueError):
+                    understanding_errors.append("update_failed")
+        if defer_post_turn and self.long_memory is not None and _is_explicit_memory_update(text):
+            reply += "\n\n这条记忆已进入后台整理队列，当前尚未确认写入完成。"
             try:
-                confirmed = self.personal_understanding.resolve_pending_confirmation(text, turn_id)
-            except (sqlite3.Error, ValueError):
-                understanding_errors.append("confirmation_failed")
-            try:
-                event = self.personal_understanding.observe_turn(turn_id, text, reply)
-                understanding_written = event.written_claim_ids
-                queued = event.queued_job_ids
-                processed = event.processed_job_ids
-                understanding_errors.extend(event.errors)
-            except (ModelError, sqlite3.Error, ValueError):
-                understanding_errors.append("update_failed")
-        if self.long_memory is not None and "extract_failed" in errors and _is_explicit_memory_update(text):
+                self.store.update_assistant(turn_id, reply)
+            except (AttributeError, sqlite3.Error):
+                errors.append("transcript_update_failed")
+        if self.long_memory is not None and not defer_post_turn and "extract_failed" in errors and _is_explicit_memory_update(text):
             reply += "\n\n不过，这次长期记忆没有成功保存或更新；我不想让你误以为已经记住。"
             try:
                 self.store.update_assistant(turn_id, reply)
             except (AttributeError, sqlite3.Error):
                 errors.append("transcript_update_failed")
-        if (self.personal_understanding is not None and
+        if (self.personal_understanding is not None and not defer_post_turn and
                 "update_failed" in understanding_errors and
                 PersonalUnderstanding.is_urgent(text)):
             reply += "\n\n另外，这次我没能可靠更新对你情况的理解，所以不会把这次修订当成已经完成。"
@@ -114,12 +146,13 @@ class Agent:
                 understanding_errors.append("transcript_update_failed")
         self.last_memory_event = MemoryEvent(
             tuple(m.id for m in memories), written, tuple(errors),
-            self.long_memory.last_search if self.long_memory is not None else None)
+            self.long_memory.last_search if self.long_memory is not None else None,
+            memory_queued)
         self.last_understanding_event = UnderstandingEvent(
             retrieved_claim_ids=tuple(c.id for c in claims),
             written_claim_ids=tuple(understanding_written),
             confirmed_claim_ids=tuple(confirmed),
-            queued_job_ids=tuple(queued),
+            queued_job_ids=tuple(understanding_queued or queued),
             processed_job_ids=tuple(processed),
             errors=tuple(understanding_errors),
             search=self.personal_understanding.last_search if self.personal_understanding is not None else None,
