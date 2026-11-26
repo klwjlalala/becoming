@@ -403,10 +403,10 @@ class PersonalUnderstanding:
                     DELETE FROM understanding_revisions
                     WHERE id NOT IN (SELECT DISTINCT revision_id FROM understanding_revision_evidence);
                     UPDATE understanding_claims
-                    SET current_version=(
+                    SET current_version=COALESCE((
                         SELECT MAX(version) FROM understanding_claim_versions
                         WHERE claim_id=understanding_claims.id
-                    ),
+                    ),0),
                     status=COALESCE((
                         SELECT status FROM understanding_claim_versions
                         WHERE claim_id=understanding_claims.id
