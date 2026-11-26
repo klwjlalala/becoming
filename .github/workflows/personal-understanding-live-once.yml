@@ -1,6 +1,11 @@
 name: Personal understanding live evaluation (manual)
 
 on:
+  push:
+    branches:
+      - feat/dynamic-personal-understanding-v1
+    paths:
+      - '.github/workflows/personal-understanding-live-once.yml'
   workflow_dispatch:
 
 permissions:
@@ -12,7 +17,10 @@ concurrency:
 
 jobs:
   evaluate:
-    if: github.ref == 'refs/heads/feat/dynamic-personal-understanding-v1'
+    if: >-
+      github.ref == 'refs/heads/feat/dynamic-personal-understanding-v1' &&
+      (github.event_name == 'workflow_dispatch' ||
+       github.event.head_commit.message == 'run personal understanding 30-turn live evaluation once 2026-11-26')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
