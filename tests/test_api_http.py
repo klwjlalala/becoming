@@ -18,6 +18,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class FakeModelHandler(BaseHTTPRequestHandler):
+    blocked_source_text = None
+    extraction_started = threading.Event()
+    extraction_release = threading.Event()
+
     def do_POST(self):
         size = int(self.headers.get("Content-Length", "0"))
         payload = json.loads(self.rfile.read(size).decode("utf-8"))
@@ -34,7 +38,11 @@ class FakeModelHandler(BaseHTTPRequestHandler):
                 current = extraction_input.get("current_user_message", "")
             except (ValueError, AttributeError):
                 current = ""
-            if current == "我喜欢晚上阅读。":
+            if current == self.blocked_source_text:
+                self.extraction_started.set()
+                self.extraction_release.wait(5)
+                reply = "[]"
+            elif current == "我喜欢晚上阅读。":
                 reply = json.dumps([{
                     "key": "reading_time",
                     "category": "subjective",
@@ -170,8 +178,35 @@ class APIHTTPTests(unittest.TestCase):
             cls.temp.cleanup()
 
     def setUp(self):
+        FakeModelHandler.blocked_source_text = None
+        FakeModelHandler.extraction_release.set()
+        self.wait_for_idle()
         pending = self.request("POST", "/data/clear")
         self.request("POST", "/data/clear/confirm", {"token": pending["token"]})
+
+    def wait_for_turn_jobs(self, turn_id, timeout=10):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            result = self.request(
+                "GET", f"/background/jobs?source_turn_id={turn_id}&limit=10"
+            )
+            items = result["items"]
+            if len(items) >= 2 and all(item["status"] == "done" for item in items):
+                return items
+            if any(item["status"] == "failed" for item in items):
+                self.fail(f"Background task failed for turn {turn_id}: {items}")
+            time.sleep(0.05)
+        self.fail(f"Background tasks did not finish for turn {turn_id}")
+
+    def wait_for_idle(self, timeout=10):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            status = self.request("GET", "/background/status")
+            counts = status["counts"]
+            if counts["pending"] == 0 and counts["running"] == 0:
+                return
+            time.sleep(0.05)
+        self.fail("Background worker did not become idle")
 
     def request(self, method, path, payload=None, expected=200):
         data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -215,11 +250,13 @@ class APIHTTPTests(unittest.TestCase):
         self.assertIn("模拟模型回复", sent["reply"])
         self.assertTrue(sent["message_id"])
         self.assertFalse(sent["confirmation_required"])
+        self.wait_for_turn_jobs(sent["message_id"])
 
-        self.request(
+        memory_turn = self.request(
             "POST", f"/conversations/{first_id}/messages",
             {"content": "我喜欢晚上阅读。"},
         )
+        self.wait_for_turn_jobs(memory_turn["message_id"])
         saved_memories = self.request("GET", "/memories")
         self.assertEqual(saved_memories["items"][0]["quote"], "我喜欢晚上阅读。")
 
@@ -228,6 +265,7 @@ class APIHTTPTests(unittest.TestCase):
             {"content": "你还记得我喜欢什么时候阅读吗？"},
         )
         self.assertIn("晚上阅读", recall["reply"])
+        self.wait_for_turn_jobs(recall["message_id"])
 
         proposal = self.request(
             "POST", f"/conversations/{first_id}/messages",
@@ -237,6 +275,7 @@ class APIHTTPTests(unittest.TestCase):
         self.assertEqual(proposal["growth_event"]["status"], "proposed")
         token = proposal["confirmation"]["token"]
         self.assertNotIn(token, proposal["reply"])
+        self.wait_for_turn_jobs(proposal["message_id"])
         committed = self.request(
             "POST", f"/conversations/{first_id}/confirm", {"token": token}
         )
@@ -254,10 +293,11 @@ class APIHTTPTests(unittest.TestCase):
         self.assertEqual(self.request("GET", "/memories")["items"], [])
         allowed = self.request("POST", "/memories/reading_time/allow")
         self.assertTrue(allowed["allowed"])
-        self.request(
+        restored_memory = self.request(
             "POST", f"/conversations/{second_id}/messages",
             {"content": "我喜欢晚上阅读。"},
         )
+        self.wait_for_turn_jobs(restored_memory["message_id"])
         self.assertEqual(len(self.request("GET", "/memories")["items"]), 1)
 
         understanding = self.request(
@@ -265,8 +305,9 @@ class APIHTTPTests(unittest.TestCase):
             {"content": "我想更新你对我的理解：我更在意能自己安排时间。"},
         )
         self.assertEqual(
-            len(understanding["understanding_event"]["written_claim_ids"]), 1
+            len(understanding["understanding_event"]["queued_job_ids"]), 1
         )
+        self.wait_for_turn_jobs(understanding["message_id"])
         claims = self.request("GET", "/understanding/claims")
         self.assertEqual(len(claims["items"]), 1)
         claim_id = claims["items"][0]["id"]
@@ -309,14 +350,16 @@ class APIHTTPTests(unittest.TestCase):
     def test_conversation_delete_cascades_only_selected_session(self):
         first = self.request("POST", "/conversations", {"title": "保留会话"}, 201)
         second = self.request("POST", "/conversations", {"title": "删除会话"}, 201)
-        self.request(
+        keep_turn = self.request(
             "POST", f"/conversations/{first['id']}/messages",
             {"content": "保留的内容"},
         )
-        self.request(
+        delete_turn = self.request(
             "POST", f"/conversations/{second['id']}/messages",
             {"content": "将被删除的内容"},
         )
+        self.wait_for_turn_jobs(keep_turn["message_id"])
+        self.wait_for_turn_jobs(delete_turn["message_id"])
         result = self.request("DELETE", f"/conversations/{second['id']}")
         self.assertEqual(result["deleted_turns"], 1)
         self.assertEqual(
