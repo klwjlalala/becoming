@@ -173,6 +173,7 @@ class BackgroundWorker:
                     turn_id, user_text, assistant_text, process=False
                 )
                 event = manager.process_pending(limit=5, retry_failed=True)
+                manager.resolve_deferred_confirmations()
                 internal = self.db.execute("""
                     SELECT status,attempts FROM understanding_jobs
                     WHERE job_key=?
