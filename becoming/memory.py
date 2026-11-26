@@ -11,76 +11,7 @@ from .models import Message
 
 class ConversationStore(Protocol):
     def recent(self, limit: int) -> list[Message]: ...
-    def append_turn(
-        self, user: str, assistant: str, *,
-        background_jobs: tuple[tuple[str, int], ...] = (),
-    ) -> int:
-        turn_id = None
-        with self.connection:
-            cursor = self.connection.execute(
-                """INSERT INTO turns (user_text, assistant_text, conversation_id)
-                   VALUES (?, ?, ?)""",
-                (user, assistant, self.conversation_id),
-            )
-            turn_id = cursor.lastrowid
-            self.connection.execute(
-                "UPDATE conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (self.conversation_id,),
-            )
-            for kind, priority in background_jobs:
-                self.connection.execute("""
-                    INSERT OR IGNORE INTO background_jobs
-                    (kind, source_turn_id, priority)
-                    VALUES (?, ?, ?)
-                """, (kind, turn_id, priority))
-        return turn_id
-
-    def list_background_jobs(
-        self, *, limit: int = 50, status: str | None = None,
-        source_turn_id: int | None = None,
-    ) -> list[dict]:
-        if not 1 <= limit <= 200:
-            raise ValueError("Background job limit must be between 1 and 200")
-        if status is not None and status not in {
-            "pending", "running", "done", "failed", "cancelled"
-        }:
-            raise ValueError("Invalid background job status")
-        clauses, params = [], []
-        if status is not None:
-            clauses.append("j.status=?")
-            params.append(status)
-        if source_turn_id is not None:
-            if type(source_turn_id) is not int or source_turn_id < 1:
-                raise ValueError("Invalid source turn ID")
-            clauses.append("j.source_turn_id=?")
-            params.append(source_turn_id)
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        rows = self.connection.execute(
-            """
-            SELECT j.id,j.kind,j.source_turn_id,t.conversation_id,j.priority,
-                   j.status,j.attempts,j.available_at,j.started_at,j.finished_at,
-                   j.last_error,j.created_at,j.updated_at
-            FROM background_jobs j
-            JOIN turns t ON t.id=j.source_turn_id
-            """ + where + " ORDER BY j.id DESC LIMIT ?",
-            (*params, limit),
-        ).fetchall()
-        fields = (
-            "id", "kind", "source_turn_id", "conversation_id", "priority",
-            "status", "attempts", "available_at", "started_at", "finished_at",
-            "last_error", "created_at", "updated_at",
-        )
-        return [dict(zip(fields, row)) for row in rows]
-
-    def background_job_counts(self) -> dict[str, dict[str, int]]:
-        rows = self.connection.execute("""
-            SELECT kind,status,COUNT(*) FROM background_jobs GROUP BY kind,status
-        """).fetchall()
-        result: dict[str, dict[str, int]] = {}
-        for kind, status, count in rows:
-            result.setdefault(kind, {})[status] = count
-        return result
-
+    def append_turn(self, user: str, assistant: str) -> int: ...
     def update_assistant(self, turn_id: int, assistant: str) -> None: ...
 
 
@@ -341,18 +272,74 @@ class SQLiteConversationStore:
             ])
         return messages
 
-    def append_turn(self, user: str, assistant: str) -> int:
+    def append_turn(
+        self, user: str, assistant: str, *,
+        background_jobs: tuple[tuple[str, int], ...] = (),
+    ) -> int:
         with self.connection:
             cursor = self.connection.execute(
                 """INSERT INTO turns (user_text, assistant_text, conversation_id)
                    VALUES (?, ?, ?)""",
                 (user, assistant, self.conversation_id),
             )
+            turn_id = cursor.lastrowid
             self.connection.execute(
                 "UPDATE conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (self.conversation_id,),
             )
-            return cursor.lastrowid
+            for kind, priority in background_jobs:
+                self.connection.execute("""
+                    INSERT OR IGNORE INTO background_jobs
+                    (kind, source_turn_id, priority)
+                    VALUES (?, ?, ?)
+                """, (kind, turn_id, priority))
+            return turn_id
+
+    def list_background_jobs(
+        self, *, limit: int = 50, status: str | None = None,
+        source_turn_id: int | None = None,
+    ) -> list[dict]:
+        if not 1 <= limit <= 200:
+            raise ValueError("Background job limit must be between 1 and 200")
+        if status is not None and status not in {
+            "pending", "running", "done", "failed", "cancelled"
+        }:
+            raise ValueError("Invalid background job status")
+        clauses, params = [], []
+        if status is not None:
+            clauses.append("j.status=?")
+            params.append(status)
+        if source_turn_id is not None:
+            if type(source_turn_id) is not int or source_turn_id < 1:
+                raise ValueError("Invalid source turn ID")
+            clauses.append("j.source_turn_id=?")
+            params.append(source_turn_id)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        rows = self.connection.execute(
+            """
+            SELECT j.id,j.kind,j.source_turn_id,t.conversation_id,j.priority,
+                   j.status,j.attempts,j.available_at,j.started_at,j.finished_at,
+                   j.last_error,j.created_at,j.updated_at
+            FROM background_jobs j
+            JOIN turns t ON t.id=j.source_turn_id
+            """ + where + " ORDER BY j.id DESC LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+        fields = (
+            "id", "kind", "source_turn_id", "conversation_id", "priority",
+            "status", "attempts", "available_at", "started_at", "finished_at",
+            "last_error", "created_at", "updated_at",
+        )
+        return [dict(zip(fields, row)) for row in rows]
+
+    def background_job_counts(self) -> dict[str, dict[str, int]]:
+        rows = self.connection.execute("""
+            SELECT kind,status,COUNT(*) FROM background_jobs GROUP BY kind,status
+        """).fetchall()
+        result: dict[str, dict[str, int]] = {}
+        for kind, status, count in rows:
+            result.setdefault(kind, {})[status] = count
+        return result
 
     def update_assistant(self, turn_id: int, assistant: str) -> None:
         with self.connection:
