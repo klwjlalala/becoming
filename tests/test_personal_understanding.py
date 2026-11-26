@@ -209,6 +209,19 @@ class PersonalUnderstandingTests(unittest.TestCase):
             self.assertEqual(self.store.connection.execute(
                 "SELECT COUNT(*) FROM understanding_evidence").fetchone()[0], 0)
 
+
+    def test_sensitive_claim_content_is_rejected_even_when_quote_is_not_sensitive(self):
+        proposal = json.loads(create_proposal(quote="我最近心情很低落。"))
+        proposal["operations"][0]["content"] = "用户可能患有抑郁症。"
+        engine, model = self.make_engine(json.dumps(proposal, ensure_ascii=False))
+        turn_id = self.store.append_turn("我最近心情很低落。", "我听到了。")
+        engine._enqueue(turn_id, "normal")
+        event = engine.process_pending()
+        self.assertEqual(event.errors, ("update_failed",))
+        self.assertEqual(engine.list_claims(), [])
+        self.assertEqual(self.store.connection.execute(
+            "SELECT COUNT(*) FROM understanding_evidence").fetchone()[0], 0)
+
     def test_confirmation_only_when_question_was_actually_asked(self):
         raw = json.loads(create_proposal())
         raw["confirmation"] = {
