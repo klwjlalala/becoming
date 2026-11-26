@@ -22,6 +22,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install project and API dependencies
+        run: python -m pip install -e .
       - name: Run offline tests
         run: python -m unittest discover -s tests -v
 
@@ -38,6 +40,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install project and API dependencies
+        run: python -m pip install -e .
       - name: Run explicit live functional tests
         env:
           BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
