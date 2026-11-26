@@ -326,8 +326,9 @@ class BackgroundWorkerTests(unittest.TestCase):
         store.close()
 
         model = EmptyModel()
+        configured = {"model": None}
         worker = BackgroundWorker(
-            self.db_path, lambda: None,
+            self.db_path, lambda: configured["model"],
             enable_long_memory=True,
             enable_personal_understanding=False,
         )
@@ -340,6 +341,7 @@ class BackgroundWorkerTests(unittest.TestCase):
             self.assertEqual((status, attempts), ("pending", 0))
             self.assertEqual(worker.last_error, "model_not_configured")
 
+            configured["model"] = model
             worker.set_model(model)
             self.assertTrue(worker.run_once())
             status, attempts = worker.db.execute(
