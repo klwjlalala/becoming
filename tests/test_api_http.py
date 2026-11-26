@@ -382,6 +382,51 @@ class APIHTTPTests(unittest.TestCase):
             FakeModelHandler.extraction_release.set()
             FakeModelHandler.blocked_source_text = None
 
+    def test_data_clear_waits_for_active_background_processing(self):
+        FakeModelHandler.blocked_source_text = "清空数据时后台任务正在执行。"
+        FakeModelHandler.extraction_started.clear()
+        FakeModelHandler.extraction_release.clear()
+        outcome = {}
+        try:
+            conversation = self.request(
+                "POST", "/conversations", {"title": "待清空会话"}, 201
+            )
+            self.request(
+                "POST", f"/conversations/{conversation['id']}/messages",
+                {"content": FakeModelHandler.blocked_source_text},
+            )
+            self.assertTrue(FakeModelHandler.extraction_started.wait(2))
+            preview = self.request("POST", "/data/clear")
+
+            def clear():
+                try:
+                    outcome["result"] = self.request(
+                        "POST", "/data/clear/confirm", {"token": preview["token"]}
+                    )
+                except BaseException as exc:
+                    outcome["error"] = exc
+
+            clearer = threading.Thread(target=clear)
+            clearer.start()
+            time.sleep(0.1)
+            self.assertTrue(clearer.is_alive())
+
+            FakeModelHandler.extraction_release.set()
+            clearer.join(timeout=5)
+            self.assertFalse(clearer.is_alive())
+            self.assertNotIn("error", outcome, repr(outcome.get("error")))
+            self.assertTrue(outcome["result"]["success"])
+            self.assertEqual(
+                [item["id"] for item in self.request("GET", "/conversations")["items"]],
+                ["default"],
+            )
+            status = self.request("GET", "/background/status")
+            self.assertEqual(status["counts"]["pending"], 0)
+            self.assertEqual(status["counts"]["running"], 0)
+        finally:
+            FakeModelHandler.extraction_release.set()
+            FakeModelHandler.blocked_source_text = None
+
     def test_conversation_delete_waits_for_active_background_processing(self):
         FakeModelHandler.blocked_source_text = "删除会话时后台任务正在执行。"
         FakeModelHandler.extraction_started.clear()
