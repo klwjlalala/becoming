@@ -79,13 +79,15 @@ HTTP API 模式下，消息回复完成后，长期记忆提取和动态个人�
 - `personal_understanding.process` 复用既有 `understanding_jobs` 批处理队列；命题写入与内部任务完成状态在同一事务提交，避免崩溃后重复应用同一修订。
 - 任务有 `pending/running/done/failed/cancelled` 状态，最多尝试 3 次；临时失败采用延迟重试，进程启动时将中断的 `running` 任务恢复为 `pending`。
 - 用户确认个人理解的回复如果先于后台提取到达，worker 会在创建确认问题后检查同一会话的下一轮消息并补做确认；不同会话的待确认状态互不影响。
-- 删除来源对话或清除全部数据时，外键级联删除尚存的来源任务。
+- 删除来源对话或清除全部数据时，外键级联删除尚存的来源任务；执行破坏性操作前会暂停领取新任务并等待当前任务结束，等待超时则返回 `409 background_busy`，避免后台写入与删除竞争。
 
 查询：
 
     GET /api/v1/background/status
     GET /api/v1/background/jobs?limit=50
     GET /api/v1/background/jobs?source_turn_id=123
+
+状态响应还包含 `paused` 和 `active_jobs`，便于客户端区分 worker 是否正在排空任务或处于维护暂停状态。
 
 任务状态只表示本地处理结果，不代表模型对用户的理解一定正确。`failed` 任务需要在客户端提示用户后台整理未完成；不能把 `pending/running` 描述成已经保存。显式要求记住的信息在任务完成前，助手会说明仍在后台整理。
 
@@ -155,7 +157,7 @@ POST /api/v1/conversations/{id}/messages
 1. 安装 FastAPI/Uvicorn。
 2. 运行原有确定性功能测试。
 3. 启动独立的 loopback API 进程，使用临时 SQLite 文件和 DemoModel。
-4. 启动持久化后台 worker，并通过 Python 标准库 HTTP 客户端执行健康检查、会话隔离、聊天、成长预览/确认、后台任务状态、数据导出和全量清除。
+4. 启动持久化后台 worker，并通过 Python 标准库 HTTP 客户端执行健康检查、会话隔离、聊天、成长预览/确认、后台任务状态、非阻塞处理、暂停屏障、数据导出和全量清除。
 
 该流程在 GitHub runner 内部完成，不需要公网部署或 UI。真实模型 API 测试使用独立手动工作流 `API live HTTP smoke (manual)`（`.github/workflows/api-live-smoke.yml`）、仓库 Secrets 和虚构测试数据；该用例会执行模型连接测试、一次真实 HTTP 对话，并等待真实模型完成长期记忆提取和个人理解后台任务；默认 CI 不消耗真实模型额度。
 
