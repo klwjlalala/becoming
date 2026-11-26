@@ -75,6 +75,11 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
     app.state.runtime = runtime or AppRuntime.from_env()
     app.state.owns_runtime = runtime is None
 
+    @app.on_event("shutdown")
+    def shutdown_runtime():
+        if app.state.owns_runtime:
+            app.state.runtime.close()
+
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):
         request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
