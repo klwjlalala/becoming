@@ -42,7 +42,7 @@ Evidence 只描述用户在某个时间表达过的内容，不把模型解释�
 | kind | direct_statement / self_interpretation / correction / experience / outcome_feedback / context |
 | event_time | 用户明确提供的事件时间；未知时为空 |
 | recorded_at | 系统记录时间 |
-| created_at | 证据入库时间 |
+| recorded_at | 来源对话轮次的记录时间 |
 
 约束：
 
@@ -138,7 +138,7 @@ V1 操作：
 2. 证据不足以安全地当成已确认认识。
 3. 助手在自然回复中确实向用户提出了与该命题直接相关的确认问题。
 
-建议字段：claim_id、claim_version、source_turn_id、question、status、expires_after_turn_id、created_at。
+实际字段：claim_id、claim_version_id、source_turn_id、question、status、created_at、resolved_at。程序只接受紧接着下一条对话轮次中的明确肯定/否定；错过该轮或回应含糊即过期。
 
 问题文本必须能在对应 assistant_text 中找到；不能由提取模型虚构“助手问过的问题”。待确认事项只等待紧接着的用户回应；若用户转移话题或回应不明确，则过期，不反复追问。只有明确肯定或否定才更新 user_validation。
 
@@ -155,7 +155,7 @@ V1 操作：
 | understanding_revisions | 每次修订的审计记录 |
 | understanding_revision_evidence | 修订与来源证据的关联 |
 | understanding_pending_confirmations | 自然对话中等待用户确认的事项 |
-| understanding_jobs | 延迟提取、即时修订和周期复核队列 |
+| understanding_jobs | 普通证据与即时纠正的更新队列 |
 
 所有 source_turn_id 都应外键关联 turns 并级联删除。删除来源证据后，不允许把无证据的命题继续作为当前理解使用；删除全部对话时，应一并清除关联命题、版本、修订与待确认项。长期记忆表不被本模块修改，二者只共享原始对话来源。
 
