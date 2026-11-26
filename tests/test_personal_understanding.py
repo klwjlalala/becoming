@@ -42,7 +42,8 @@ def create_proposal(quote="我更在意能自己安排时间。", assistant="明
     }, ensure_ascii=False)
 
 
-def reinforce_proposal(claim_id, quote, version=1, operation="REINFORCE", relation="support"):
+def reinforce_proposal(claim_id, quote, version=1, operation="REINFORCE", relation="support",
+                       content="用户重视自主安排时间。", dimension="values"):
     return json.dumps({
         "evidence": [{
             "ref": "e1", "turn_index": 0, "quote": quote,
@@ -51,8 +52,8 @@ def reinforce_proposal(claim_id, quote, version=1, operation="REINFORCE", relati
         }],
         "operations": [{
             "operation": operation, "claim_ref": None, "claim_id": claim_id,
-            "expected_version": version, "content": "用户重视自主安排时间。",
-            "dimension": "values", "basis": "explicit_statement", "scope": {},
+            "expected_version": version, "content": content,
+            "dimension": dimension, "basis": "explicit_statement", "scope": {},
             "temporal_scope": "ongoing",
             "evidence": [{"ref": "e1", "relation": relation}],
             "reason": "新增证据使当前理解需要更新。",
@@ -163,11 +164,16 @@ class PersonalUnderstandingTests(unittest.TestCase):
         self.assertEqual(updated.support_level, "low")
 
     def test_explicit_rejection_removes_claim_from_current_retrieval(self):
-        engine, model = self.make_engine(create_proposal())
-        claim = self.create_claim(engine, model)
+        engine, model = self.make_engine(create_proposal(
+            quote="我想把创业当成人生目标。",
+            content="用户把创业视为人生目标。",
+            dimension="motivation",
+        ))
+        claim = self.create_claim(engine, model, quote="我想把创业当成人生目标。")
         model.outputs.append(reinforce_proposal(
             claim.id, "你理解错了，我并不把创业当成我的人生目标。",
             operation="REJECT", relation="counter",
+            content="用户把创业视为人生目标。", dimension="motivation",
         ))
         quote = "你理解错了，我并不把创业当成我的人生目标。"
         turn_id = self.store.append_turn(quote, "我会修正。")
@@ -343,6 +349,57 @@ class PersonalUnderstandingTests(unittest.TestCase):
         self.assertEqual(len(model.calls), 1)
         self.assertIn(claim.content, model.calls[0][0]["content"])
         self.assertEqual(agent.last_understanding_event.retrieved_claim_ids, (claim.id,))
+
+
+    def test_confirmation_expires_if_an_intervening_turn_was_skipped(self):
+        raw = json.loads(create_proposal())
+        raw["confirmation"] = {
+            "claim_id": None, "claim_ref": "c1", "expected_version": 1,
+            "turn_index": 0, "question": "你觉得这个理解准确吗？",
+        }
+        engine, model = self.make_engine(json.dumps(raw, ensure_ascii=False))
+        first = self.store.append_turn(
+            "更正一下：我更在意能自己安排时间。",
+            "你觉得这个理解准确吗？",
+        )
+        engine._enqueue(first, "immediate")
+        engine.process_pending()
+        # Simulate a host-side control turn which does not pass through Agent.reply.
+        self.store.append_turn("我先处理一下其他事情。", "好的。")
+        answer_turn = self.store.append_turn("是的", "收到。")
+        self.assertEqual(engine.resolve_pending_confirmation("是的", answer_turn), ())
+        status = self.store.connection.execute(
+            "SELECT status FROM understanding_pending_confirmations").fetchone()[0]
+        self.assertEqual(status, "expired")
+        claim, = engine.list_claims()
+        self.assertEqual(claim.user_validation, "unconfirmed")
+
+    def test_high_support_requires_evidence_across_time(self):
+        engine, model = self.make_engine(create_proposal())
+        first = self.store.append_turn("我更在意能自己安排时间。", "明白。")
+        self.store.connection.execute(
+            "UPDATE turns SET created_at='2024-01-01 09:00:00' WHERE id=?", (first,))
+        engine._enqueue(first, "normal")
+        engine.process_pending()
+        claim, = engine.list_claims()
+
+        second_quote = "如果必须选，我还是更看重自主安排时间。"
+        second = self.store.append_turn(second_quote, "理解。")
+        self.store.connection.execute(
+            "UPDATE turns SET created_at='2024-01-02 09:00:00' WHERE id=?", (second,))
+        model.outputs.append(reinforce_proposal(claim.id, second_quote, version=1))
+        engine._enqueue(second, "normal")
+        engine.process_pending()
+        self.assertEqual(engine.list_claims()[0].support_level, "medium")
+
+        third_quote = "即使有更高头衔，我仍然更希望自己安排时间。"
+        third = self.store.append_turn(third_quote, "知道了。")
+        self.store.connection.execute(
+            "UPDATE turns SET created_at='2024-02-01 09:00:00' WHERE id=?", (third,))
+        model.outputs.append(reinforce_proposal(claim.id, third_quote, version=2))
+        engine._enqueue(third, "normal")
+        engine.process_pending()
+        self.assertEqual(engine.list_claims()[0].support_level, "high")
 
     def test_store_mismatch_and_invalid_limits(self):
         other = SQLiteConversationStore(":memory:")
