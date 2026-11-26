@@ -213,6 +213,31 @@ class BackgroundWorkerTests(unittest.TestCase):
             worker.stop()
             store.close()
 
+    def test_jobs_are_cancelled_when_their_feature_is_disabled(self):
+        store = SQLiteConversationStore(self.db_path)
+        turn_id = store.append_turn(
+            "我喜欢安静的环境。", "明白。",
+            background_jobs=(("long_memory.extract", 0),),
+        )
+        store.close()
+
+        worker = BackgroundWorker(
+            self.db_path, lambda: None,
+            enable_long_memory=False,
+            enable_personal_understanding=False,
+        )
+        try:
+            self.assertTrue(worker.run_once())
+            status, error = worker.db.execute(
+                "SELECT status,last_error FROM background_jobs WHERE source_turn_id=?",
+                (turn_id,),
+            ).fetchone()
+            self.assertEqual(status, "cancelled")
+            self.assertEqual(error, "feature_disabled")
+            self.assertIsNone(worker.last_error)
+        finally:
+            worker.stop()
+
     def test_personal_understanding_jobs_run_off_the_request_path(self):
         store = SQLiteConversationStore(self.db_path)
         turn_id = store.append_turn(
