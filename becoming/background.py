@@ -61,6 +61,25 @@ class BackgroundWorker:
             if enable_personal_understanding else None
         )
         self._recover_interrupted_jobs()
+        self._cancel_disabled_jobs()
+
+    def _cancel_disabled_jobs(self) -> None:
+        disabled = []
+        if not self.enable_long_memory:
+            disabled.append("long_memory.extract")
+        if not self.enable_personal_understanding:
+            disabled.append("personal_understanding.process")
+        if not disabled:
+            return
+        with self.db:
+            for kind in disabled:
+                self.db.execute("""
+                    UPDATE background_jobs
+                    SET status='cancelled',started_at=NULL,
+                        finished_at=CURRENT_TIMESTAMP,last_error='feature_disabled',
+                        updated_at=CURRENT_TIMESTAMP
+                    WHERE kind=? AND status IN ('pending','running','failed')
+                """, (kind,))
 
     def _recover_interrupted_jobs(self) -> None:
         """Reconcile claimed jobs against durable processor receipts on startup."""
@@ -114,6 +133,8 @@ class BackgroundWorker:
             self.long_memory.model = model
         if self.personal_understanding is not None:
             self.personal_understanding.model = model
+        self.last_error = None
+        self.wake()
 
     def start(self) -> None:
         if self.thread is not None and self.thread.is_alive():
@@ -263,6 +284,15 @@ class BackgroundWorker:
 
     def run_once(self) -> bool:
         """Process one ready job; exposed for deterministic unit tests."""
+        if self.model_provider() is None:
+            ready = self.db.execute("""
+                SELECT 1 FROM background_jobs
+                WHERE status='pending' AND attempts < ? AND available_at <= ?
+                LIMIT 1
+            """, (MAX_ATTEMPTS, time.time())).fetchone()
+            if ready:
+                self.last_error = "model_not_configured"
+            return False
         # Claim and register the active job under one condition lock. This
         # closes the race where pause() could observe zero active jobs after a
         # claim but before processing had registered itself.
