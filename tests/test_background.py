@@ -306,7 +306,7 @@ class BackgroundWorkerTests(unittest.TestCase):
             enable_personal_understanding=False,
         )
         try:
-            self.assertTrue(worker.run_once())
+            self.assertFalse(worker.run_once())
             status, error = worker.db.execute(
                 "SELECT status,last_error FROM background_jobs WHERE source_turn_id=?",
                 (turn_id,),
@@ -314,6 +314,40 @@ class BackgroundWorkerTests(unittest.TestCase):
             self.assertEqual(status, "cancelled")
             self.assertEqual(error, "feature_disabled")
             self.assertIsNone(worker.last_error)
+        finally:
+            worker.stop()
+
+    def test_jobs_wait_without_consuming_attempts_until_model_is_configured(self):
+        store = SQLiteConversationStore(self.db_path)
+        turn_id = store.append_turn(
+            "模型暂未配置时仍要保留任务。", "稍后整理。",
+            background_jobs=(("long_memory.extract", 0),),
+        )
+        store.close()
+
+        model = EmptyModel()
+        worker = BackgroundWorker(
+            self.db_path, lambda: None,
+            enable_long_memory=True,
+            enable_personal_understanding=False,
+        )
+        try:
+            self.assertFalse(worker.run_once())
+            status, attempts = worker.db.execute(
+                "SELECT status,attempts FROM background_jobs WHERE source_turn_id=?",
+                (turn_id,),
+            ).fetchone()
+            self.assertEqual((status, attempts), ("pending", 0))
+            self.assertEqual(worker.last_error, "model_not_configured")
+
+            worker.set_model(model)
+            self.assertTrue(worker.run_once())
+            status, attempts = worker.db.execute(
+                "SELECT status,attempts FROM background_jobs WHERE source_turn_id=?",
+                (turn_id,),
+            ).fetchone()
+            self.assertEqual((status, attempts), ("done", 1))
+            self.assertEqual(model.calls, 1)
         finally:
             worker.stop()
 
