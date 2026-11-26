@@ -214,6 +214,8 @@ class AppRuntime:
                 "counts": totals,
                 "by_kind": by_kind,
                 "last_error": None,
+                "paused": False,
+                "active_jobs": 0,
                 "max_attempts": 3,
             }
         # Read queue counters through the request-side connection. The
