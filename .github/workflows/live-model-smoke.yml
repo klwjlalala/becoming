@@ -26,7 +26,7 @@ jobs:
         run: python -m unittest discover -s tests -v
 
   live:
-    name: Live model conversation and restart
+    name: Live model functional integration
     needs: offline
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -38,9 +38,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Run live model smoke test
+      - name: Run explicit live functional tests
         env:
           BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
           BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
           BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
-        run: python -m unittest discover -s tests -p live_smoke.py -v
+        run: python -m unittest discover -s tests -p 'live_*.py' -v

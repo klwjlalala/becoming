@@ -38,14 +38,15 @@ PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前
 - becoming/prompts.py：基础角色提示词
 - becoming/__main__.py：命令行入口
 - docs/architecture.md：当前设计与后续研究边界
-- tests/：确定性功能测试及手动真实模型冒烟测试
+- tests/：确定性功能测试及真实模型显式能力调用集成测试
 - evaluation/：智能体效果评测（最小框架）
 - docs/testing.md：两类测试的边界、运行方式与验收原则
 
 ## 测试
 
-- 功能测试：`python -m unittest discover -s tests -v`，自动 CI，不消耗真实模型额度。
-- 效果评测：`python -m evaluation`，离线列出用例；真实模型调用须显式 `--live --case <ID>`，人工评审。
+- 功能测试（离线）：`python -m unittest discover -s tests -v`，自动 CI，不消耗真实模型额度。
+- 功能测试（真实模型）：`python -m unittest discover -s tests -p 'live_*.py' -v`，显式指定能力、验证真实调用链路；仅按需执行。
+- 效果评测：`python -m evaluation`，离线列出用例；真实模型调用须显式 `--live --case <ID>`，自然场景评估需求理解、能力选择、解决效果。
 - 真实 API 功能冒烟测试仍通过手动 Actions 运行，详见 [测试说明](docs/testing.md)。
 
 ## 开发原则
