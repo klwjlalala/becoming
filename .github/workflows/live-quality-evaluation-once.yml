@@ -20,7 +20,7 @@ jobs:
     if: >-
       github.ref == 'refs/heads/feat/live-quality-evaluation-v1' &&
       (github.event_name == 'workflow_dispatch' ||
-       github.event.head_commit.message == 'run targeted live memory and growth re-evaluation once 2026-11-26')
+       github.event.head_commit.message == 'run targeted live memory and growth re-evaluation v2 once 2026-11-26')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -64,14 +64,14 @@ jobs:
             --case memory-lifecycle \
             --case growth-action-journey \
             --max-calls 45 \
-            --output artifacts/live-quality-recheck.json
+            --output artifacts/live-quality-recheck-v2.json
       - name: Upload complete conversation and evidence report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: becoming-live-quality-recheck
+          name: becoming-live-quality-recheck-v2
           path: |
-            artifacts/live-quality-recheck.json
-            artifacts/live-quality-recheck.md
+            artifacts/live-quality-recheck-v2.json
+            artifacts/live-quality-recheck-v2.md
           if-no-files-found: warn
           retention-days: 14

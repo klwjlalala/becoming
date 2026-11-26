@@ -12,7 +12,7 @@ from .models import ModelError
 PREFIX = "GROWTH_TOOL\n"
 POLICY = """【个人成长与行动辅助（可选工具）】
 自然交流优先。只在用户需要实际查询或明确希望记录/调整时使用工具；愿望、倾诉、讨论和建议不等于记录请求。
-普通回复直接输出自然语言。若需工具，整条回复必须是 GROWTH_TOOL 加换行和一个 JSON 对象，且仅含 tool 和 args 两键，不加代码围栏。
+普通回复直接输出自然语言。若需工具，可以先有一句简短说明，但 GROWTH_TOOL 必须单独占一行，下一行是仅含 tool 和 args 两键的 JSON 对象，不加代码围栏。
 可用工具：
 list_goals {"offset":0}（offset 可省略）
 get_goal {"goal_id":1,"offset":0}（offset 可省略；返回行动及复盘）
@@ -91,7 +91,7 @@ class GrowthModel:
                 ]
                 try:
                     final = self.model.complete(followup)
-                    if not isinstance(final, str) or not final.strip() or final.strip().startswith(PREFIX):
+                    if not isinstance(final, str) or not final.strip() or _tool_payload(final.strip()) is not None:
                         raise ModelError("Invalid final response")
                 except ModelError:
                     final = "已读取记录，但模型未能完成解读。"
