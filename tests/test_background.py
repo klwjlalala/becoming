@@ -117,6 +117,34 @@ class BackgroundWorkerTests(unittest.TestCase):
         finally:
             worker.stop()
 
+    def test_source_conversation_deletion_cascades_pending_tasks(self):
+        store = SQLiteConversationStore(self.db_path)
+        conversation = store.create_conversation("待删除会话")
+        scoped = store.for_conversation(conversation["id"])
+        turn_id = scoped.append_turn(
+            "我喜欢安静的环境。", "明白。",
+            background_jobs=(
+                ("long_memory.extract", 0),
+                ("personal_understanding.process", 0),
+            ),
+        )
+        self.assertEqual(
+            store.connection.execute(
+                "SELECT COUNT(*) FROM background_jobs WHERE source_turn_id=?",
+                (turn_id,),
+            ).fetchone()[0],
+            2,
+        )
+        store.delete_conversation(conversation["id"])
+        self.assertEqual(
+            store.connection.execute(
+                "SELECT COUNT(*) FROM background_jobs WHERE source_turn_id=?",
+                (turn_id,),
+            ).fetchone()[0],
+            0,
+        )
+        store.close()
+
     def test_personal_understanding_jobs_run_off_the_request_path(self):
         store = SQLiteConversationStore(self.db_path)
         turn_id = store.append_turn(
