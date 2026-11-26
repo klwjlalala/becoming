@@ -43,6 +43,41 @@ class FakeModelHandler(BaseHTTPRequestHandler):
                 }], ensure_ascii=False)
             else:
                 reply = "[]"
+        elif "你是个人理解更新引擎" in system_text:
+            update_input = json.loads(messages[-1].get("content", "{}"))
+            target = next(
+                (turn for turn in update_input.get("turns", [])
+                 if "我更在意能自己安排时间。" in turn.get("user_text", "")),
+                None,
+            )
+            if target is None:
+                reply = json.dumps({
+                    "evidence": [], "operations": [], "confirmation": None,
+                }, ensure_ascii=False)
+            else:
+                reply = json.dumps({
+                    "evidence": [{
+                        "ref": "e1",
+                        "turn_index": target["turn_index"],
+                        "quote": "我更在意能自己安排时间。",
+                        "kind": "direct_statement",
+                        "event_time": None,
+                    }],
+                    "operations": [{
+                        "operation": "CREATE",
+                        "claim_ref": "c1",
+                        "claim_id": None,
+                        "expected_version": None,
+                        "content": "用户重视自主安排时间。",
+                        "dimension": "values",
+                        "basis": "explicit_statement",
+                        "scope": {},
+                        "temporal_scope": "ongoing",
+                        "evidence": [{"ref": "e1", "relation": "support"}],
+                        "reason": "用户直接表达了对自主时间的偏好。",
+                    }],
+                    "confirmation": None,
+                }, ensure_ascii=False)
         elif "请帮我创建成长目标" in user_text:
             reply = (
                 "GROWTH_TOOL\n"
@@ -95,7 +130,7 @@ class APIHTTPTests(unittest.TestCase):
             "BECOMING_API_KEY": "test-api-key-never-return-this",
             "BECOMING_MODEL": "test-model",
             "BECOMING_ENABLE_LONG_MEMORY": "1",
-            "BECOMING_ENABLE_PERSONAL_UNDERSTANDING": "0",
+            "BECOMING_ENABLE_PERSONAL_UNDERSTANDING": "1",
         })
         cls.process = subprocess.Popen(
             [sys.executable, "-c", "from becoming.api import run; run()"],
@@ -209,8 +244,8 @@ class APIHTTPTests(unittest.TestCase):
 
         first_history = self.request("GET", f"/conversations/{first_id}/messages")
         second_history = self.request("GET", f"/conversations/{second_id}/messages")
-        self.assertEqual(len(first_history["items"]), 4)
-        self.assertEqual(len(second_history["items"]), 1)
+        self.assertEqual(len(first_history["items"]), 5)
+        self.assertEqual(len(second_history["items"]), 2)
 
         goals = self.request("GET", "/growth/goals")
         self.assertEqual(goals["items"][0]["text"], "每周自由探索一次")
@@ -224,11 +259,31 @@ class APIHTTPTests(unittest.TestCase):
             {"content": "我喜欢晚上阅读。"},
         )
         self.assertEqual(len(self.request("GET", "/memories")["items"]), 1)
+
+        understanding = self.request(
+            "POST", f"/conversations/{first_id}/messages",
+            {"content": "我想更新你对我的理解：我更在意能自己安排时间。"},
+        )
+        self.assertEqual(
+            len(understanding["understanding_event"]["written_claim_ids"]), 1
+        )
+        claims = self.request("GET", "/understanding/claims")
+        self.assertEqual(len(claims["items"]), 1)
+        claim_id = claims["items"][0]["id"]
+        detail = self.request("GET", f"/understanding/claims/{claim_id}")
+        self.assertEqual(detail["claim"]["content"], "用户重视自主安排时间。")
+        self.assertEqual(len(detail["history"]), 1)
+
         self.assertIn("items", self.request("GET", "/understanding/claims"))
         exported = self.request("GET", "/data/export")
-        self.assertEqual(len(exported["turns"]), 6)
+        self.assertEqual(len(exported["turns"]), 7)
         self.assertEqual(len(exported["long_memories"]), 1)
+        self.assertEqual(len(exported["personal_understanding"]), 1)
         self.assertEqual(len(exported["growth_items"]), 1)
+
+        self.request("DELETE", f"/conversations/{first_id}")
+        self.assertEqual(self.request("GET", "/understanding/claims")["items"], [])
+        self.assertEqual(len(self.request("GET", "/memories")["items"]), 1)
 
         clear = self.request("POST", "/data/clear")
         self.assertTrue(clear["confirmation_required"])
