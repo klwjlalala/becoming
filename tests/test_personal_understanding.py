@@ -687,6 +687,36 @@ class PersonalUnderstandingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             engine.process_pending(limit=6)
 
+    def test_claim_list_offset_pagination_is_stable(self):
+        model = ScriptedModel(
+            create_proposal("我更在意能自己安排时间。", claim_ref="c1"),
+            create_proposal("我希望有稳定的收入。", claim_ref="c2",
+                            content="用户希望拥有稳定收入。", dimension="constraints"),
+            create_proposal("我喜欢研究新的技术。", claim_ref="c3",
+                            content="用户喜欢研究新技术。", dimension="interests"),
+        )
+        engine = PersonalUnderstanding(self.store, model)
+        for quote in (
+            "我更在意能自己安排时间。",
+            "我希望有稳定的收入。",
+            "我喜欢研究新的技术。",
+        ):
+            turn_id = self.store.append_turn(quote, "明白。")
+            engine._enqueue(turn_id, "normal")
+            event = engine.process_pending()
+            self.assertFalse(event.errors)
+
+        full = engine.list_claims(limit=200)
+        first = engine.list_claims(limit=1, offset=0)
+        second = engine.list_claims(limit=1, offset=1)
+        third = engine.list_claims(limit=1, offset=2)
+        self.assertEqual(
+            [item.id for item in first + second + third],
+            [item.id for item in full],
+        )
+        with self.assertRaises(ValueError):
+            engine.list_claims(limit=1, offset=-1)
+
 
 if __name__ == "__main__":
     unittest.main()
