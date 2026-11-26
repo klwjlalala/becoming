@@ -72,3 +72,11 @@ PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前
     python -m evaluation.cross_time --live --case growth-001
 
 对比无记忆、V1.1 和综合检索的同一虚构场景，真实模型命令仅手动执行。
+
+
+### 长期记忆质量诊断（真实历史对话）
+
+    python -m evaluation.memory_quality
+    python -m evaluation.memory_quality --live --case quality-001 --output quality-001.json
+
+三组虚构跨年对话，分别检查提取遗漏、历史修订、候选与选择阶段；三个检索模式共享同一历史快照。报告需人工审查，不自动判断质量通过。真实模式会消耗额度，尤其 quality-003（46 轮）。

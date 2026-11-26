@@ -23,3 +23,5 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Validate effect evaluation scaffold (offline)
         run: python -m evaluation
+      - name: Validate longitudinal quality fixtures (offline)
+        run: python -m evaluation.memory_quality
