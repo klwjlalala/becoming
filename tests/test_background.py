@@ -27,6 +27,22 @@ class EmptyModel:
         return "[]"
 
 
+class BlockingModel:
+    def __init__(self):
+        import threading
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.calls = 0
+
+    def complete(self, messages):
+        self.calls += 1
+        if self.calls == 1:
+            self.started.set()
+            if not self.release.wait(5):
+                raise ModelError("blocking model timed out")
+        return "[]"
+
+
 class BackgroundWorkerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -144,6 +160,58 @@ class BackgroundWorkerTests(unittest.TestCase):
             0,
         )
         store.close()
+
+    def test_pause_waits_for_active_job_and_prevents_new_claims(self):
+        import threading
+
+        store = SQLiteConversationStore(self.db_path)
+        first_turn = store.append_turn(
+            "第一条用于暂停测试。", "明白。",
+            background_jobs=(("long_memory.extract", 0),),
+        )
+        model = BlockingModel()
+        worker = BackgroundWorker(
+            self.db_path, lambda: model,
+            enable_long_memory=True,
+            enable_personal_understanding=False,
+        )
+        runner = threading.Thread(target=worker.run_once)
+        try:
+            runner.start()
+            self.assertTrue(model.started.wait(2))
+            self.assertFalse(worker.pause(timeout=0.02))
+            model.release.set()
+            runner.join(timeout=3)
+            self.assertFalse(runner.is_alive())
+            self.assertTrue(worker.pause(timeout=1))
+
+            second_turn = store.append_turn(
+                "第二条用于验证暂停。", "明白。",
+                background_jobs=(("long_memory.extract", 0),),
+            )
+            self.assertFalse(worker.run_once())
+            self.assertEqual(
+                worker.db.execute(
+                    "SELECT status FROM background_jobs WHERE source_turn_id=?",
+                    (second_turn,),
+                ).fetchone()[0],
+                "pending",
+            )
+            worker.resume()
+            self.assertTrue(worker.run_once())
+            self.assertEqual(
+                worker.db.execute(
+                    "SELECT status FROM background_jobs WHERE source_turn_id=?",
+                    (second_turn,),
+                ).fetchone()[0],
+                "done",
+            )
+        finally:
+            model.release.set()
+            runner.join(timeout=3)
+            worker.resume()
+            worker.stop()
+            store.close()
 
     def test_personal_understanding_jobs_run_off_the_request_path(self):
         store = SQLiteConversationStore(self.db_path)
