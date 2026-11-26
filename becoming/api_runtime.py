@@ -146,8 +146,9 @@ class AppRuntime:
         scoped = self.store.for_conversation(conversation_id)
         memory = LongMemory(scoped, model) if self.enable_long_memory else None
         understanding = (
-            PersonalUnderstanding(scoped, model)
-            if self.enable_personal_understanding else None
+            PersonalUnderstanding(
+                scoped, model, recover_running_jobs=False
+            ) if self.enable_personal_understanding else None
         )
         agent = GrowthAgent(
             model,
@@ -165,7 +166,9 @@ class AppRuntime:
 
     def understanding_manager(self) -> PersonalUnderstanding:
         scoped = self.store.for_conversation("default")
-        return PersonalUnderstanding(scoped, self.model or DemoModel())
+        return PersonalUnderstanding(
+            scoped, self.model or DemoModel(), recover_running_jobs=False
+        )
 
     def start_background_worker(self) -> None:
         if not self.background_supported:
