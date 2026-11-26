@@ -516,6 +516,34 @@ class PersonalUnderstandingTests(unittest.TestCase):
             self.assertEqual(event.errors, ("update_failed",))
             self.assertEqual(engine.list_claims(), [])
 
+
+    def test_reflective_retrieval_includes_goals_and_real_world_constraints(self):
+        engine, model = self.make_engine()
+        scenarios = [
+            ("我重视拥有选择权。", "用户重视拥有选择权。", "values"),
+            ("我未来一年想把 AI 知识学扎实。", "用户未来一年的目标是扎实学习 AI。", "goals"),
+            ("家里的固定支出让我需要稳定现金流。", "用户需要稳定现金流以覆盖固定支出。", "constraints"),
+            ("我以前的想法现在发生了变化。", "用户明确意识到自己对某项认识发生了变化。", "cognition"),
+            ("我喜欢围绕共同兴趣深入交流。", "用户偏好围绕共同兴趣进行深入交流。", "patterns"),
+            ("我希望能选择自己愿意承担的约束。", "用户将自由理解为选择愿意承担的约束。", "self_concept"),
+        ]
+        for quote, claim_text, dimension in scenarios:
+            model.outputs.append(create_proposal(
+                quote=quote, content=claim_text, dimension=dimension,
+            ))
+            turn_id = self.store.append_turn(quote, "明白。")
+            engine._enqueue(turn_id, "normal")
+            event = engine.process_pending()
+            self.assertFalse(event.errors)
+        selected = engine.retrieve(
+            "结合之前聊过的内容，我真正想要的生活有哪些取舍和变化？"
+        )
+        dimensions = {claim.dimension for claim in selected}
+        self.assertIn("goals", dimensions)
+        self.assertIn("constraints", dimensions)
+        self.assertIn("values", dimensions)
+        self.assertLessEqual(len(selected), 7)
+
     def test_store_mismatch_and_invalid_limits(self):
         other = SQLiteConversationStore(":memory:")
         self.addCleanup(other.close)
@@ -523,7 +551,7 @@ class PersonalUnderstandingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Agent(ScriptedModel(), self.store, personal_understanding=engine)
         with self.assertRaises(ValueError):
-            engine.retrieve("test", 6)
+            engine.retrieve("test", 8)
         with self.assertRaises(ValueError):
             engine.process_pending(limit=6)
 
