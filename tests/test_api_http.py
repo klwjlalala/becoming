@@ -347,6 +347,37 @@ class APIHTTPTests(unittest.TestCase):
         self.assertNotIn(secret, json.dumps(updated))
         self.assertNotIn(secret, json.dumps(self.request("GET", "/model/config")))
 
+    def test_post_turn_memory_work_is_async_and_observable(self):
+        FakeModelHandler.blocked_source_text = "后台阻塞验证：请不要等待记忆整理。"
+        FakeModelHandler.extraction_started.clear()
+        FakeModelHandler.extraction_release.clear()
+        try:
+            conversation = self.request(
+                "POST", "/conversations", {"title": "后台任务验证"}, 201
+            )
+            started = time.monotonic()
+            result = self.request(
+                "POST", f"/conversations/{conversation['id']}/messages",
+                {"content": FakeModelHandler.blocked_source_text},
+            )
+            elapsed = time.monotonic() - started
+            self.assertLess(elapsed, 1.5)
+            self.assertTrue(FakeModelHandler.extraction_started.wait(2))
+
+            jobs = self.request(
+                "GET", f"/background/jobs?source_turn_id={result['message_id']}&limit=10"
+            )["items"]
+            memory_job = next(item for item in jobs if item["kind"] == "long_memory.extract")
+            self.assertEqual(memory_job["status"], "running")
+            self.assertTrue(result["reply"])
+
+            FakeModelHandler.extraction_release.set()
+            finished = self.wait_for_turn_jobs(result["message_id"])
+            self.assertTrue(all(item["status"] == "done" for item in finished))
+        finally:
+            FakeModelHandler.extraction_release.set()
+            FakeModelHandler.blocked_source_text = None
+
     def test_conversation_delete_cascades_only_selected_session(self):
         first = self.request("POST", "/conversations", {"title": "保留会话"}, 201)
         second = self.request("POST", "/conversations", {"title": "删除会话"}, 201)
