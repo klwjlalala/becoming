@@ -219,10 +219,15 @@ class APIHTTPTests(unittest.TestCase):
         self.assertEqual(self.request("GET", "/memories")["items"], [])
         allowed = self.request("POST", "/memories/reading_time/allow")
         self.assertTrue(allowed["allowed"])
+        self.request(
+            "POST", f"/conversations/{second_id}/messages",
+            {"content": "我喜欢晚上阅读。"},
+        )
+        self.assertEqual(len(self.request("GET", "/memories")["items"]), 1)
         self.assertIn("items", self.request("GET", "/understanding/claims"))
         exported = self.request("GET", "/data/export")
-        self.assertEqual(len(exported["turns"]), 5)
-        self.assertEqual(exported["long_memories"], [])
+        self.assertEqual(len(exported["turns"]), 6)
+        self.assertEqual(len(exported["long_memories"]), 1)
         self.assertEqual(len(exported["growth_items"]), 1)
 
         clear = self.request("POST", "/data/clear")
@@ -232,6 +237,7 @@ class APIHTTPTests(unittest.TestCase):
         )
         self.assertTrue(result["success"])
         self.assertEqual(self.request("GET", "/growth/goals")["items"], [])
+        self.assertEqual(self.request("GET", "/memories")["items"], [])
         remaining = self.request("GET", "/conversations")
         self.assertEqual([item["id"] for item in remaining["items"]], ["default"])
 
