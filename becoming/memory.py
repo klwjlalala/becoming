@@ -152,12 +152,6 @@ class SQLiteConversationStore:
 
     def archive_conversation(self, conversation_id: str, archived: bool = True) -> dict:
         with self.connection:
-            cursor = self.connection.execute(
-                """UPDATE conversations
-                   SET archived_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                ("CURRENT_TIMESTAMP" if False else None, conversation_id)
-                if not archived else (None, conversation_id),
-            ) if False else None
             if archived:
                 cursor = self.connection.execute(
                     "UPDATE conversations SET archived_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?",
