@@ -757,6 +757,26 @@ class PersonalUnderstandingTests(unittest.TestCase):
 
         other_store.close()
 
+    def test_read_manager_does_not_requeue_a_live_worker_job(self):
+        model = ScriptedModel()
+        engine = PersonalUnderstanding(self.store, model)
+        turn_id = self.store.append_turn("我更在意能自己安排时间。", "明白。")
+        engine._enqueue(turn_id, "normal")
+        self.store.connection.execute(
+            "UPDATE understanding_jobs SET status='running' WHERE source_turn_id=?",
+            (turn_id,),
+        )
+        self.store.connection.commit()
+
+        PersonalUnderstanding(
+            self.store, model, recover_running_jobs=False
+        )
+        status = self.store.connection.execute(
+            "SELECT status FROM understanding_jobs WHERE source_turn_id=?",
+            (turn_id,),
+        ).fetchone()[0]
+        self.assertEqual(status, "running")
+
     def test_claim_list_offset_pagination_is_stable(self):
         model = ScriptedModel(
             create_proposal("我更在意能自己安排时间。", claim_ref="c1"),
