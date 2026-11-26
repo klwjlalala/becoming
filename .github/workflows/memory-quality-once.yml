@@ -1,0 +1,46 @@
+name: One-off longitudinal memory evaluation
+on:
+  push:
+    branches:
+      - feat/long-term-memory-v1
+    paths:
+      - '.github/workflows/memory-quality-once.yml'
+permissions:
+  contents: read
+concurrency:
+  group: memory-quality-once
+  cancel-in-progress: false
+jobs:
+  evaluate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/long-term-memory-v1' && github.event.head_commit.message == 'test(memory): authorize one-off quality-001 run 2026-11-26'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify offline baseline and fixtures
+        run: |
+          python -m unittest discover -s tests -v
+          python -m evaluation.memory_quality
+      - name: Run one explicitly authorized real-model scenario
+        env:
+          BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
+          BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
+          BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
+        run: |
+          set -eu
+          for key in BECOMING_BASE_URL BECOMING_API_KEY BECOMING_MODEL; do
+            if [ -z "${!key}" ]; then
+              echo "Missing model configuration: $key"
+              exit 1
+            fi
+          done
+          marker=$(python -c 'import uuid; print(uuid.uuid4())')
+          echo "::stop-commands::$marker"
+          trap 'echo "::$marker::"' EXIT
+          python -m evaluation.memory_quality --live --case quality-001 --output quality-001.json
+          cat quality-001.json
