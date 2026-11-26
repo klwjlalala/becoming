@@ -3,6 +3,8 @@ import unittest
 from datetime import date
 from pathlib import Path
 
+from evaluation.personal_understanding import DatedSQLiteConversationStore
+
 
 FIXTURE = Path(__file__).parents[1] / "evaluation" / "personal_understanding_cases.json"
 
@@ -18,6 +20,18 @@ class PersonalUnderstandingFixtureTests(unittest.TestCase):
         days = [date.fromisoformat(turn["day"]) for turn in turns]
         self.assertEqual(days, sorted(days))
         self.assertEqual(len(set(days)), len(days))
+
+    def test_simulated_fixture_day_is_persisted_as_turn_timestamp(self):
+        store = DatedSQLiteConversationStore()
+        try:
+            store.simulated_day = "2024-01-10"
+            turn_id = store.append_turn("用户原话", "助手回复")
+            row = store.connection.execute(
+                "SELECT created_at FROM turns WHERE id=?", (turn_id,)
+            ).fetchone()
+            self.assertEqual(row[0], "2024-01-10T12:00:00+00:00")
+        finally:
+            store.close()
 
     def test_evidence_quotes_are_source_bound_and_labels_unique(self):
         labels = set()
