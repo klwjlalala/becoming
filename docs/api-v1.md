@@ -59,7 +59,7 @@ API 不提供读取密钥的接口。运行时通过 HTTP 配置的 API Key 只�
 | POST | /growth/changes | 生成成长变更预览 |
 | POST | /growth/changes/{token}/confirm | 确认预览并提交 |
 | POST | /growth/changes/{token}/cancel | 取消预览 |
-| GET/DELETE | /memories | 查看长期记忆 / 删除槽位 |
+| GET | /memories | 查看长期记忆 |\n| DELETE | /memories/{key} | 删除记忆槽位并阻止重新写入 |
 | POST | /memories/{key}/allow | 允许未来重新写入该槽位 |
 | GET | /understanding/claims | 查看动态个人理解 |
 | GET | /understanding/claims/{id} | 查看命题及版本历史 |
@@ -97,7 +97,7 @@ POST /api/v1/conversations/{id}/messages
     POST /api/v1/growth/changes
     {"tool": "create_goal", "args": {"text": "每周自由探索一次"}}
 
-服务返回 token 和 preview；只有调用对应 confirm 路由后才写入数据库。重复确认、失效 token 或数据版本冲突都会被拒绝。
+服务返回 token 和 preview；只有调用对应 confirm 路由后才写入数据库。确认 token 有效期为 10 分钟；重复确认、失效 token 或数据版本冲突都会被拒绝。
 
 ## 会话与记忆边界
 
@@ -122,7 +122,7 @@ POST /api/v1/conversations/{id}/messages
       }
     }
 
-客户端应按 code 处理状态；不应依赖 message 文案。请求验证失败不回显请求 body，防止把模型密钥或私人内容写入错误响应。
+客户端应按 code 处理状态；不应依赖 message 文案。请求验证失败不回显请求 body，防止把模型密钥或私人内容写入错误响应。请求体大小上限为 64 KiB，客户端 request ID 会经过格式校验。
 
 ## GitHub Actions 联调
 
