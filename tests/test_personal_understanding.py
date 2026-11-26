@@ -450,6 +450,26 @@ class PersonalUnderstandingTests(unittest.TestCase):
         self.assertEqual(restored.status, "active")
         self.assertEqual(len(engine.get_claim_history(claim.id)), 1)
 
+
+    def test_deleting_reinforcement_evidence_recalculates_support_level(self):
+        engine, model = self.make_engine(create_proposal())
+        claim = self.create_claim(engine, model)
+        quote = "如果必须选，我还是更看重自主安排时间。"
+        model.outputs.append(reinforce_proposal(claim.id, quote))
+        second = self.store.append_turn(quote, "理解。")
+        self.store.connection.execute(
+            "UPDATE turns SET created_at='2024-02-01 09:00:00' WHERE id=?", (second,))
+        engine._enqueue(second, "normal")
+        engine.process_pending()
+        self.assertEqual(engine.list_claims()[0].support_level, "medium")
+        with self.store.connection:
+            self.store.connection.execute("DELETE FROM turns WHERE id=?", (second,))
+        restored, = engine.list_claims()
+        self.assertEqual(restored.version, 2)
+        self.assertEqual(restored.support_level, "low")
+        self.assertEqual(restored.status, "active")
+        self.assertEqual(engine.list_revisions(claim.id)[-1]["operation"], "CREATE")
+
     def test_store_mismatch_and_invalid_limits(self):
         other = SQLiteConversationStore(":memory:")
         self.addCleanup(other.close)
