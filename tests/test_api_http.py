@@ -370,6 +370,10 @@ class APIHTTPTests(unittest.TestCase):
             memory_job = next(item for item in jobs if item["kind"] == "long_memory.extract")
             self.assertEqual(memory_job["status"], "running")
             self.assertTrue(result["reply"])
+            status = self.request("GET", "/background/status")
+            self.assertTrue(status["running"])
+            self.assertEqual(status["active_jobs"], 1)
+            self.assertEqual(status["counts"]["running"], 1)
 
             FakeModelHandler.extraction_release.set()
             finished = self.wait_for_turn_jobs(result["message_id"])
