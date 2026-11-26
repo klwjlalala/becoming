@@ -1,0 +1,65 @@
+name: Personal understanding live evaluation (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-understanding-live-evaluation
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    if: github.ref == 'refs/heads/feat/dynamic-personal-understanding-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run deterministic regression tests
+        run: python -m unittest discover -s tests -v
+      - name: Validate longitudinal fixture without model calls
+        run: python -m evaluation.personal_understanding
+      - name: Verify model configuration without exposing secrets
+        env:
+          BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
+          BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
+          BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in BECOMING_BASE_URL BECOMING_API_KEY BECOMING_MODEL; do
+            if [[ -z "${!key}" ]]; then
+              echo "::error::Missing repository secret: $key"
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            exit 1
+          fi
+          echo "All required model configuration values are present."
+      - name: Run 30-turn real-model longitudinal evaluation
+        env:
+          BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
+          BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
+          BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
+        run: |
+          python -m evaluation.personal_understanding \
+            --live \
+            --max-calls 80 \
+            --output artifacts/personal-understanding-live.json
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: personal-understanding-live-evaluation
+          path: artifacts/personal-understanding-live.json
+          if-no-files-found: warn
+          retention-days: 14
