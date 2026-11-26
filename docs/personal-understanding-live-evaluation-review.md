@@ -10,8 +10,9 @@ This review covers PR #7, `feat/dynamic-personal-understanding-v1`. All live sce
 |---|---|---:|---:|---|---|
 | [Initial live run](https://github.com/klwjlalala/becoming/actions/runs/45811203777) | `dda64f7` | 30 turns | 39 / 80 | Completed; no model/update errors | Fixture dates were not injected into transcript timestamps. Valid as an ordered multi-turn smoke test, not a time-gap evaluation. |
 | [Date-aware live run](https://github.com/klwjlalala/becoming/actions/runs/45813188214) | `0deea31` | 30 turns | 39 / 60 | Completed; no model/update errors | Fixture dates were persisted as each turn's `created_at`, so the update engine received the 2024–2026 timeline. |
+| [Final retrieval recheck](https://github.com/klwjlalala/becoming/actions/runs/45815014202) | `130e302` | 30 turns | 39 / 50 | Completed; no model/update errors | Re-ran after relevance-gated support ranking and event-level experience retrieval changes. |
 
-The date-aware run validated 30 turns, 28 source-bound evidence labels, and 11 human-review criteria. The report intentionally has no automatic quality verdict.
+The date-aware runs validated 30 turns, 28 source-bound evidence labels, and 11 human-review criteria. All live runs use fictional data and the reports intentionally have no automatic quality verdict.
 
 ## Human review of the date-aware run
 
@@ -24,11 +25,13 @@ The date-aware run validated 30 turns, 28 source-bound evidence labels, and 11 h
 - Stored the mountain-top / city-observation moment as a low-support, event-scoped experience rather than inferring a stable personality trait.
 - Explicit listening requests, a third-party-only story, and a transient mood message suppressed personal-context retrieval.
 - The final synthesis was cautious, separated stated preferences from interpretation, and described changes over time.
+- In the final retrieval recheck, the Python question selected zero personal claims; explicit listen-only, third-party-only, and transient-mood turns also selected zero claims.
+- The final life-direction query retrieved the event-level mountain experience after the ranking correction. The model still chose not to mention it in its final synthesis, avoiding an unsupported inference from a single emotional event.
 
 ### Issues found and addressed after the live run
 
-1. **Meaningful experience retrieval.** The mountain experience was stored but was not selected for the final “what kind of life do I want?” synthesis. Ranking now gives event-level experience evidence an additional relevance boost for life-meaning / desired-life queries. A deterministic regression test verifies that this experience ranks ahead of generic values claims.
-2. **Unrelated high-support retrieval.** The date-aware run showed a Python question retrieving two unrelated high-support claims. The cause was an unconditional support-level score bonus. The bonus now applies only after lexical relevance has been established. A regression test covers the Python query.
+1. **Meaningful experience retrieval.** The first date-aware run stored the mountain experience but did not retrieve it for the final “what kind of life do I want?” synthesis. Ranking now gives event-level experience evidence an additional relevance boost for life-meaning / desired-life queries. The final live recheck confirmed the event was retrieved; the model chose not to cite it in the final answer, which avoided over-interpreting a single experience. A deterministic regression test verifies ranking priority.
+2. **Unrelated high-support retrieval.** The date-aware run showed a Python question retrieving two unrelated high-support claims. The cause was an unconditional support-level score bonus. The bonus now applies only after lexical relevance has been established. The final live recheck confirmed the Python question selected zero personal claims, and a deterministic regression test covers the case.
 3. **Evidence lineage during refinement.** Existing versions could lose evidence that remained relevant after a refinement. The update protocol now allows the model to select prior evidence IDs from the target claim's current version; the program validates ownership before reattaching them.
 4. **Retrieval suppression.** Explicit listen-only turns, clearly third-party-only venting, and common transient-mood messages now avoid unnecessary personal-context injection.
 5. **Evaluation time fidelity.** The longitudinal harness now writes each fixture date into the transcript row before the understanding engine processes it.
@@ -39,7 +42,7 @@ The date-aware run validated 30 turns, 28 source-bound evidence labels, and 11 h
 - The suite includes evidence-lineage validation, forged prior-evidence rejection, retrieval suppression, irrelevant high-support retrieval, meaningful-experience ranking, and simulated timestamp persistence.
 - Latest passing workflow: [Functional tests](https://github.com/klwjlalala/becoming/actions/runs/45814505652).
 
-The final retrieval-ranking correction was made after the date-aware live run. Its deterministic behavior is covered by tests, but a further real-model synthesis run has not yet been performed.
+The final retrieval-ranking correction was followed by a third date-aware real-model run. The live recheck confirmed that the Python query no longer injects unrelated claims and that the event-level experience is available to the final life-direction query. The model did not mention that experience in its answer; this is recorded as a cautious omission rather than a failed retrieval.
 
 ## Remaining limitations
 
@@ -53,4 +56,4 @@ The final retrieval-ranking correction was made after the date-aware live run. I
 
 ## Acceptance status
 
-PR #7 remains **Draft**. Do not merge or claim long-term relationship quality is proven until the remaining retrieval correction has been reviewed in a targeted live-model check and the full PR stack has been combined and regression-tested.
+PR #7 remains **Draft**. Three live runs and 166 offline tests provide useful evidence of functionality, but do not prove long-term relationship quality. Before merge, combine the full PR dependency chain, run the full regression suite, and conduct broader human review with additional scenarios and real usage over time.
