@@ -2,6 +2,7 @@
 import json
 import sqlite3
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -328,31 +329,42 @@ class BackgroundWorkerTests(unittest.TestCase):
 
         model = EmptyModel()
         configured = {"model": None}
+        observer = SQLiteConversationStore(self.db_path)
         worker = BackgroundWorker(
             self.db_path, lambda: configured["model"],
             enable_long_memory=True,
             enable_personal_understanding=False,
         )
         try:
-            self.assertFalse(worker.run_once())
-            status, attempts = worker.db.execute(
+            worker.start()
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and worker.last_error != "model_not_configured":
+                time.sleep(0.01)
+            self.assertEqual(worker.last_error, "model_not_configured")
+            status, attempts = observer.connection.execute(
                 "SELECT status,attempts FROM background_jobs WHERE source_turn_id=?",
                 (turn_id,),
             ).fetchone()
             self.assertEqual((status, attempts), ("pending", 0))
-            self.assertEqual(worker.last_error, "model_not_configured")
 
             configured["model"] = model
             worker.set_model(model)
-            self.assertTrue(worker.run_once())
-            status, attempts = worker.db.execute(
-                "SELECT status,attempts FROM background_jobs WHERE source_turn_id=?",
-                (turn_id,),
-            ).fetchone()
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                status, attempts = observer.connection.execute(
+                    "SELECT status,attempts FROM background_jobs WHERE source_turn_id=?",
+                    (turn_id,),
+                ).fetchone()
+                if status == "done":
+                    break
+                time.sleep(0.02)
             self.assertEqual((status, attempts), ("done", 1))
             self.assertEqual(model.calls, 1)
+            self.assertIsNone(worker.last_error)
         finally:
             worker.stop()
+            observer.close()
+
 
     def test_in_memory_runtime_reports_stable_status_without_worker(self):
         runtime = AppRuntime(
