@@ -60,13 +60,54 @@ class BackgroundWorker:
             PersonalUnderstanding(default_store, bootstrap_model)
             if enable_personal_understanding else None
         )
+        self._recover_interrupted_jobs()
+
+    def _recover_interrupted_jobs(self) -> None:
+        """Reconcile claimed jobs against durable processor receipts on startup."""
+        tables = {
+            row[0] for row in self.db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        rows = self.db.execute("""
+            SELECT id,kind,source_turn_id,attempts
+            FROM background_jobs WHERE status='running'
+        """).fetchall()
         with self.db:
-            self.db.execute("""
-                UPDATE background_jobs
-                SET status='pending',started_at=NULL,available_at=0,
-                    updated_at=CURRENT_TIMESTAMP
-                WHERE status='running'
-            """)
+            for job_id, kind, turn_id, attempts in rows:
+                completed = False
+                internal_exhausted = False
+                if (kind == "long_memory.extract"
+                        and "long_memory_extraction_receipts" in tables):
+                    completed = self.db.execute(
+                        "SELECT 1 FROM long_memory_extraction_receipts WHERE turn_id=?",
+                        (turn_id,),
+                    ).fetchone() is not None
+                elif (kind == "personal_understanding.process"
+                        and "understanding_jobs" in tables):
+                    internal = self.db.execute(
+                        "SELECT status,attempts FROM understanding_jobs WHERE job_key=?",
+                        (f"turn:{turn_id}",),
+                    ).fetchone()
+                    completed = bool(internal and internal[0] == "done")
+                    internal_exhausted = bool(
+                        internal and internal[0] == "failed" and internal[1] >= 3
+                    )
+
+                if completed:
+                    status, error = "done", None
+                elif attempts >= MAX_ATTEMPTS or internal_exhausted:
+                    status, error = "failed", "attempts_exhausted_after_restart"
+                else:
+                    status, error = "pending", None
+                self.db.execute("""
+                    UPDATE background_jobs
+                    SET status=?,started_at=NULL,available_at=0,last_error=?,
+                        finished_at=CASE WHEN ? IN ('done','failed')
+                                         THEN CURRENT_TIMESTAMP ELSE NULL END,
+                        updated_at=CURRENT_TIMESTAMP
+                    WHERE id=?
+                """, (status, error, status, job_id))
 
     def set_model(self, model: Model) -> None:
         if self.long_memory is not None:
