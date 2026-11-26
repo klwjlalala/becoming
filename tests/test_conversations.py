@@ -71,8 +71,8 @@ class ConversationStoreTests(unittest.TestCase):
         self.assertIsNone(self.store.get_conversation(other["id"]))
 
     def test_existing_cli_database_migrates_into_default_conversation(self):
-        self.store.close()
-        with sqlite3.connect(self.path) as connection:
+        legacy_path = Path(self.temp.name) / "legacy.sqlite3"
+        with sqlite3.connect(legacy_path) as connection:
             connection.execute("""
                 CREATE TABLE turns (
                     id INTEGER PRIMARY KEY,
@@ -86,7 +86,7 @@ class ConversationStoreTests(unittest.TestCase):
                 ("旧 CLI 消息", "旧 CLI 回复"),
             )
 
-        migrated = SQLiteConversationStore(self.path)
+        migrated = SQLiteConversationStore(legacy_path)
         self.addCleanup(migrated.close)
         self.assertEqual(
             migrated.recent(10),
@@ -97,6 +97,7 @@ class ConversationStoreTests(unittest.TestCase):
         )
         self.assertEqual(migrated.list_conversations()[0]["id"], "default")
         self.assertEqual(migrated.list_messages()[0]["user"], "旧 CLI 消息")
+
 
 
 if __name__ == "__main__":
