@@ -61,7 +61,7 @@ export BECOMING_MODEL="your-model"
 python -m becoming
 ```
 
-PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前输入和最近 12 轮历史发送到配置的模型服务；请自行确认服务的数据处理政策。默认不自动发起任何后台模型请求。不要提交真实 API Key、用户对话或数据库。
+PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前输入和最近 12 轮历史发送到配置的模型服务；请自行确认服务的数据处理政策。CLI 入口保留原有处理流程；HTTP API 服务默认会在后台调用模型整理长期记忆和个人理解，可通过 `/api/v1/background/status` 查看状态。不要提交真实 API Key、用户对话或数据库。
 
 ## 结构
 
@@ -73,6 +73,7 @@ PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前
 - becoming/__main__.py：命令行入口
 - becoming/api.py：版本化 FastAPI HTTP 接口
 - becoming/api_runtime.py：单用户服务运行时与 Agent 装配
+- becoming/background.py：持久化后台任务 worker、重试和重启恢复
 - docs/architecture.md：当前设计与后续研究边界
 - tests/：确定性功能测试及真实模型显式能力调用集成测试
 - evaluation/：智能体效果评测（最小框架）
@@ -85,7 +86,7 @@ PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前
 - 效果评测：`python -m evaluation`，离线列出通用用例；`python -m evaluation.personal_understanding` 校验 30 轮个人理解场景。
 - 真实模型个人理解集成：`python -m unittest discover -s tests -p 'live_personal_understanding.py' -v`，仅显式执行。
 - 30 轮纵向评测：`python -m evaluation.personal_understanding --live --max-calls 80 --output artifacts/personal-understanding-live.json`，需人工审查，不自动评分。
-- API HTTP 联调测试随默认 CI 运行：启动真实 loopback 服务并通过 HTTP 请求验证会话、聊天、成长变更和数据清除。
+- API HTTP 联调测试随默认 CI 运行：启动真实 loopback 服务并通过 HTTP 请求验证会话、聊天、成长变更、后台任务非阻塞、任务重试/恢复和数据清除。
 - 真实模型效果/功能测试仍通过手动 Actions 运行，详见 [测试说明](docs/testing.md)。
 
 ## 开发原则
