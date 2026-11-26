@@ -68,6 +68,8 @@ def main() -> int:
         growth = GrowthStore(growth_path) if args.growth else None
         understanding = PersonalUnderstanding(store, model) if args.personal_understanding else None
     except (ValueError, OSError, sqlite3.Error) as exc:
+        if "growth" in locals() and growth is not None:
+            growth.close()
         if "store" in locals():
             store.close()
         print(f"Startup failed: {exc}", file=sys.stderr)
