@@ -43,6 +43,8 @@ class BackgroundWorker:
         self.wake_event = threading.Event()
         self.thread: threading.Thread | None = None
         self.last_error: str | None = None
+        self._closed = False
+        self._close_lock = threading.Lock()
 
         # Ensure worker-owned schemas exist and recover the older
         # understanding-specific queue before accepting work.
@@ -88,7 +90,13 @@ class BackgroundWorker:
         if self.thread is not None:
             self.thread.join(timeout=max(0.0, timeout))
         if self.thread is None or not self.thread.is_alive():
-            self.store.close()
+            self._close_store()
+
+    def _close_store(self) -> None:
+        with self._close_lock:
+            if not self._closed:
+                self.store.close()
+                self._closed = True
 
     def _claim(self) -> dict | None:
         self.db.execute("BEGIN IMMEDIATE")
@@ -193,15 +201,18 @@ class BackgroundWorker:
         return True
 
     def _run(self) -> None:
-        while not self.stop_event.is_set():
-            try:
-                worked = self.run_once()
-            except Exception:
-                self.last_error = "background_worker_error"
-                worked = False
-            if not worked:
-                self.wake_event.wait(self.poll_interval)
-                self.wake_event.clear()
+        try:
+            while not self.stop_event.is_set():
+                try:
+                    worked = self.run_once()
+                except Exception:
+                    self.last_error = "background_worker_error"
+                    worked = False
+                if not worked:
+                    self.wake_event.wait(self.poll_interval)
+                    self.wake_event.clear()
+        finally:
+            self._close_store()
 
     def status(self) -> dict:
         rows = self.db.execute("""
