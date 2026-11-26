@@ -422,7 +422,7 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
         return {"success": True, "allowed": allowed, "key": key}
 
     @app.get("/api/v1/understanding/claims")
-    def list_understanding_claims(request: Request, limit: int = Query(default=100, ge=1, le=500)):
+    def list_understanding_claims(request: Request, limit: int = Query(default=100, ge=1, le=200)):
         rt = runtime_for(request)
         with rt.lock:
             claims = rt.understanding_manager().list_claims(limit=limit)
@@ -433,7 +433,7 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
         rt = runtime_for(request)
         with rt.lock:
             manager = rt.understanding_manager()
-            claims = {item.id: item for item in manager.list_claims(limit=500)}
+            claims = {item.id: item for item in manager.list_claims(limit=200)}
             claim = claims.get(claim_id)
             if claim is None:
                 raise APIError(404, "claim_not_found", "个人理解记录不存在。")
@@ -446,7 +446,7 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
         with rt.lock:
             memories = rt.memory_manager().list_active()
             manager = rt.understanding_manager()
-            claims = manager.list_claims(limit=5000)
+            claims = manager.list_claims(limit=200)
             growth_rows = rt.growth.connection.execute(
                 "SELECT id, kind, goal_id, text, status, version, created_at, updated_at "
                 "FROM growth_items ORDER BY id"
