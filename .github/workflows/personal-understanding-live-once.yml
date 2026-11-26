@@ -1,5 +1,7 @@
 name: Personal understanding live evaluation (manual)
 
+# Re-run after reflective retrieval was expanded to include goals and constraints.
+
 on:
   push:
     branches:
