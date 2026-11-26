@@ -27,7 +27,23 @@ class FakeModelHandler(BaseHTTPRequestHandler):
              if item.get("role") == "user"),
             "",
         )
-        if "请帮我创建成长目标" in user_text:
+        system_text = messages[0].get("content", "") if messages else ""
+        if "你是记忆提取器" in system_text:
+            try:
+                extraction_input = json.loads(messages[-1].get("content", "{}"))
+                current = extraction_input.get("current_user_message", "")
+            except (ValueError, AttributeError):
+                current = ""
+            if current == "我喜欢晚上阅读。":
+                reply = json.dumps([{
+                    "key": "reading_time",
+                    "category": "subjective",
+                    "quote": "我喜欢晚上阅读。",
+                    "replaces": None,
+                }], ensure_ascii=False)
+            else:
+                reply = "[]"
+        elif "请帮我创建成长目标" in user_text:
             reply = (
                 "GROWTH_TOOL\n"
                 + json.dumps({
@@ -35,6 +51,8 @@ class FakeModelHandler(BaseHTTPRequestHandler):
                     "args": {"text": "每周自由探索一次"},
                 }, ensure_ascii=False)
             )
+        elif "你还记得我喜欢什么时候阅读吗" in user_text:
+            reply = "你之前提到喜欢晚上阅读。"
         elif "Connection test" in user_text:
             reply = "OK"
         else:
@@ -76,7 +94,7 @@ class APIHTTPTests(unittest.TestCase):
             "BECOMING_BASE_URL": f"http://127.0.0.1:{cls.model_port}/v1",
             "BECOMING_API_KEY": "test-api-key-never-return-this",
             "BECOMING_MODEL": "test-model",
-            "BECOMING_ENABLE_LONG_MEMORY": "0",
+            "BECOMING_ENABLE_LONG_MEMORY": "1",
             "BECOMING_ENABLE_PERSONAL_UNDERSTANDING": "0",
         })
         cls.process = subprocess.Popen(
@@ -163,6 +181,19 @@ class APIHTTPTests(unittest.TestCase):
         self.assertTrue(sent["message_id"])
         self.assertFalse(sent["confirmation_required"])
 
+        self.request(
+            "POST", f"/conversations/{first_id}/messages",
+            {"content": "我喜欢晚上阅读。"},
+        )
+        saved_memories = self.request("GET", "/memories")
+        self.assertEqual(saved_memories["items"][0]["quote"], "我喜欢晚上阅读。")
+
+        recall = self.request(
+            "POST", f"/conversations/{second_id}/messages",
+            {"content": "你还记得我喜欢什么时候阅读吗？"},
+        )
+        self.assertIn("晚上阅读", recall["reply"])
+
         proposal = self.request(
             "POST", f"/conversations/{first_id}/messages",
             {"content": "请帮我创建成长目标：每周自由探索一次。"},
@@ -178,15 +209,20 @@ class APIHTTPTests(unittest.TestCase):
 
         first_history = self.request("GET", f"/conversations/{first_id}/messages")
         second_history = self.request("GET", f"/conversations/{second_id}/messages")
-        self.assertEqual(len(first_history["items"]), 3)
-        self.assertEqual(second_history["items"], [])
+        self.assertEqual(len(first_history["items"]), 4)
+        self.assertEqual(len(second_history["items"]), 1)
 
         goals = self.request("GET", "/growth/goals")
         self.assertEqual(goals["items"][0]["text"], "每周自由探索一次")
-        self.assertIn("items", self.request("GET", "/memories"))
+        deleted = self.request("DELETE", "/memories/reading_time")
+        self.assertEqual(deleted["deleted_versions"], 1)
+        self.assertEqual(self.request("GET", "/memories")["items"], [])
+        allowed = self.request("POST", "/memories/reading_time/allow")
+        self.assertTrue(allowed["allowed"])
         self.assertIn("items", self.request("GET", "/understanding/claims"))
         exported = self.request("GET", "/data/export")
-        self.assertEqual(len(exported["turns"]), 3)
+        self.assertEqual(len(exported["turns"]), 5)
+        self.assertEqual(exported["long_memories"], [])
         self.assertEqual(len(exported["growth_items"]), 1)
 
         clear = self.request("POST", "/data/clear")
