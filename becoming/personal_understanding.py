@@ -1095,6 +1095,11 @@ class PersonalUnderstanding:
         return None
 
     def resolve_pending_confirmation(self, text: str, current_turn_id: int) -> tuple[str,...]:
+        current_conversation=self.db.execute(
+            "SELECT conversation_id FROM turns WHERE id=?",(current_turn_id,)
+        ).fetchone()
+        if current_conversation is None:
+            return ()
         pending_rows=self.db.execute("""
             SELECT p.id,p.claim_id,p.claim_version_id,p.source_turn_id,
                    c.current_version,v.content,v.dimension,v.basis,v.scope_json,
@@ -1107,6 +1112,11 @@ class PersonalUnderstanding:
         eligible=[]
         stale=[]
         for row in pending_rows:
+            source_conversation=self.db.execute(
+                "SELECT conversation_id FROM turns WHERE id=?",(row[3],)
+            ).fetchone()
+            if source_conversation is None or source_conversation[0] != current_conversation[0]:
+                continue
             next_turn=self.db.execute("""
                 SELECT MIN(id) FROM turns
                 WHERE conversation_id=(
