@@ -687,6 +687,64 @@ class PersonalUnderstandingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             engine.process_pending(limit=6)
 
+    def test_delayed_confirmation_is_reconciled_without_cross_conversation_expiry(self):
+        question_a = "你觉得我这样理解准确吗？"
+        question_b = "你也这样认为吗？"
+        proposal_a = json.loads(create_proposal())
+        proposal_a["confirmation"] = {
+            "claim_id": None, "claim_ref": "c1", "expected_version": 1,
+            "turn_index": 0, "question": question_a,
+        }
+        proposal_b = json.loads(create_proposal(
+            quote="我喜欢和朋友深入交流。",
+            content="用户偏好与朋友围绕共同兴趣深入交流。",
+            dimension="patterns",
+        ))
+        proposal_b["confirmation"] = {
+            "claim_id": None, "claim_ref": "c1", "expected_version": 1,
+            "turn_index": 0, "question": question_b,
+        }
+        model = ScriptedModel(
+            json.dumps(proposal_a, ensure_ascii=False),
+            json.dumps(proposal_b, ensure_ascii=False),
+        )
+        engine = PersonalUnderstanding(self.store, model)
+
+        turn_a = self.store.append_turn(
+            "我更在意能自己安排时间。", question_a
+        )
+        engine.observe_turn(
+            turn_a, "我更在意能自己安排时间。", question_a, process=False
+        )
+
+        other = self.store.create_conversation("另一个会话")
+        other_store = self.store.for_conversation(other["id"])
+        turn_b = other_store.append_turn("我喜欢和朋友深入交流。", question_b)
+        engine.observe_turn(
+            turn_b, "我喜欢和朋友深入交流。", question_b, process=False
+        )
+
+        answer_a = "是的，我认可这个理解。"
+        next_a = self.store.append_turn(answer_a, "谢谢。")
+        # The answer can arrive before the understanding model finishes.
+        self.assertEqual(engine.resolve_pending_confirmation(answer_a, next_a), ())
+
+        first = engine.process_pending(limit=1)
+        second = engine.process_pending(limit=1)
+        self.assertFalse(first.errors)
+        self.assertFalse(second.errors)
+
+        resolved = engine.resolve_deferred_confirmations()
+        self.assertEqual(len(resolved), 1)
+        claims = engine.list_claims()
+        confirmed = next(item for item in claims if item.user_validation == "confirmed")
+        self.assertEqual(confirmed.content, "用户重视自主安排时间。")
+        pending = engine.pending_confirmations()
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["source_turn_id"], turn_b)
+
+        other_store.close()
+
     def test_claim_list_offset_pagination_is_stable(self):
         model = ScriptedModel(
             create_proposal("我更在意能自己安排时间。", claim_ref="c1"),
