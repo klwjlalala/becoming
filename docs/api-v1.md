@@ -134,6 +134,6 @@ POST /api/v1/conversations/{id}/messages
 3. 启动独立的 loopback API 进程，使用临时 SQLite 文件和 DemoModel。
 4. 通过 Python 标准库 HTTP 客户端执行健康检查、会话隔离、聊天、成长预览/确认、数据导出和全量清除。
 
-该流程在 GitHub runner 内部完成，不需要公网部署或 UI。真实模型 API 测试应使用独立手动工作流、仓库 Secrets 和虚构测试数据；默认 CI 不消耗真实模型额度。
+该流程在 GitHub runner 内部完成，不需要公网部署或 UI。真实模型 API 测试使用独立手动工作流 `API live HTTP smoke (manual)`（`.github/workflows/api-live-smoke.yml`）、仓库 Secrets 和虚构测试数据；该用例只进行模型连接测试与一次真实对话请求，默认 CI 不消耗真实模型额度。
 
 当前服务为单用户、本地、同步请求模型。它尚未提供账号认证、多租户隔离、远程部署安全、token streaming 或可取消的底层模型请求。不要把它作为公网服务部署。
