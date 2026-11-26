@@ -170,7 +170,8 @@ class SQLiteConversationStore:
         if self.get_conversation(conversation_id) is None:
             raise ValueError("Unknown conversation")
         # Explicit turn deletion also handles databases created before the
-        # conversation_id FK migration was added.
+        # conversation_id FK migration was added. The legacy default container
+        # remains as a compatibility anchor for existing CLI installations.
         with self.connection:
             count = self.connection.execute(
                 "SELECT COUNT(*) FROM turns WHERE conversation_id=?", (conversation_id,)
@@ -178,10 +179,23 @@ class SQLiteConversationStore:
             self.connection.execute(
                 "DELETE FROM turns WHERE conversation_id=?", (conversation_id,)
             )
-            self.connection.execute(
-                "DELETE FROM conversations WHERE id=?", (conversation_id,)
-            )
-        return {"conversation_id": conversation_id, "deleted_turns": count}
+            if conversation_id == "default":
+                self.connection.execute(
+                    """UPDATE conversations
+                       SET title='默认对话', archived_at=NULL, updated_at=CURRENT_TIMESTAMP
+                       WHERE id='default'"""
+                )
+                preserved_default = True
+            else:
+                self.connection.execute(
+                    "DELETE FROM conversations WHERE id=?", (conversation_id,)
+                )
+                preserved_default = False
+        return {
+            "conversation_id": conversation_id,
+            "deleted_turns": count,
+            "preserved_default": preserved_default,
+        }
 
     def list_messages(self, *, limit: int = 50, before_id: int | None = None) -> list[dict]:
         if not 1 <= limit <= 200:
