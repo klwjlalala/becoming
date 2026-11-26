@@ -253,23 +253,25 @@ class BackgroundWorker:
         finally:
             self._close_store()
 
-    def status(self) -> dict:
-        rows = self.db.execute("""
-            SELECT kind,status,COUNT(*) FROM background_jobs GROUP BY kind,status
-        """).fetchall()
-        counts: dict[str, dict[str, int]] = {}
-        for kind, state, count in rows:
-            counts.setdefault(kind, {})[state] = count
+    def status(self, *, by_kind: dict[str, dict[str, int]] | None = None) -> dict:
+        if by_kind is None:
+            rows = self.db.execute("""
+                SELECT kind,status,COUNT(*) FROM background_jobs GROUP BY kind,status
+            """).fetchall()
+            by_kind = {}
+            for kind, state, count in rows:
+                by_kind.setdefault(kind, {})[state] = count
         totals = {state: 0 for state in ("pending", "running", "done", "failed", "cancelled")}
-        for states in counts.values():
+        for states in by_kind.values():
             for state, count in states.items():
                 totals[state] += count
-        return {
-            "running": bool(self.thread and self.thread.is_alive()),
-            "counts": totals,
-            "by_kind": counts,
-            "last_error": self.last_error,
-            "paused": self._paused,
-            "active_jobs": self._active_jobs,
-            "max_attempts": MAX_ATTEMPTS,
-        }
+        with self._state:
+            return {
+                "running": bool(self.thread and self.thread.is_alive()),
+                "counts": totals,
+                "by_kind": by_kind,
+                "last_error": self.last_error,
+                "paused": self._paused,
+                "active_jobs": self._active_jobs,
+                "max_attempts": MAX_ATTEMPTS,
+            }
