@@ -38,11 +38,20 @@ The date-aware runs validated 30 turns, 28 source-bound evidence labels, and 11 
 
 ## Current deterministic verification
 
-- **166 offline tests pass** on the current branch head.
-- The suite includes evidence-lineage validation, forged prior-evidence rejection, retrieval suppression, irrelevant high-support retrieval, meaningful-experience ranking, and simulated timestamp persistence.
-- Latest passing workflow: [Functional tests](https://github.com/klwjlalala/becoming/actions/runs/45814505652).
+- **168 offline tests pass** on the current branch head.
+- The suite includes evidence-lineage validation, forged prior-evidence rejection, retrieval suppression, irrelevant high-support retrieval, meaningful-experience ranking, simulated timestamp persistence, and a combined service-loop test with long memory + dynamic personal understanding + growth tools enabled together.
+- The unified CLI startup path with all optional modules enabled is also covered.
+- Latest passing workflow: [Functional tests](https://github.com/klwjlalala/becoming/actions/runs/45832330603).
 
 The final retrieval-ranking correction was followed by a third date-aware real-model run. The live recheck confirmed that the Python query no longer injects unrelated claims and that the event-level experience is available to the final life-direction query. The model did not mention that experience in its answer; this is recorded as a cautious omission rather than a failed retrieval.
+
+## Full-stack integration audit
+
+- PR #1–#7 form a linear dependency chain: each PR targets the immediately preceding feature branch; all seven currently report mergeable, and the latest head is not behind `main`.
+- The latest branch contains 88 commits ahead of `main` and passes the full deterministic suite.
+- No GitHub review submissions or inline review threads are currently recorded for these PRs; mergeability and CI success are not substitutes for human review.
+- The deterministic service-loop integration test now runs long memory, personal understanding, and growth tools together through the same `GrowthAgent` and transcript store. A separate CLI test verifies that all optional modules can be enabled together from the unified entry point.
+- These checks establish wiring and data-flow compatibility. They do not prove the combined behavior is semantically reliable under real-model use.
 
 ## Remaining limitations
 
