@@ -216,9 +216,12 @@ class AppRuntime:
                 "last_error": None,
                 "max_attempts": 3,
             }
+        # Read queue counters through the request-side connection. The
+        # worker's SQLite connection is owned exclusively by its thread.
+        by_kind = self.store.background_job_counts()
         return {
             "supported": self.background_supported,
-            **self.background_worker.status(),
+            **self.background_worker.status(by_kind=by_kind),
         }
 
     def close(self) -> None:
