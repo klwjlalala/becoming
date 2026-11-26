@@ -669,8 +669,6 @@ class PersonalUnderstanding:
                     score += 2
             if claim.status == "disputed":
                 score -= 1
-            if claim.support_level == "high":
-                score += 1
             ranked.append((score,claim.updated_at,claim))
         ranked.sort(key=lambda row:(row[0],row[1]),reverse=True)
         return [row[2] for row in ranked if row[0]>0][:limit]
