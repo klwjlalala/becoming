@@ -9,6 +9,7 @@ from pathlib import Path
 from .agent import Agent
 from .memory import SQLiteConversationStore
 from .long_memory import LongMemory
+from .personal_understanding import PersonalUnderstanding
 from .memory_search import ComprehensiveMemory
 from .memory_improved import ImprovedMemory
 from .embeddings import OpenAICompatibleEmbedder
@@ -24,6 +25,8 @@ def main() -> int:
     parser.add_argument("--growth", action="store_true", help="Enable personal growth tools")
     parser.add_argument("--growth-db", default=None, help="Separate growth SQLite file")
     parser.add_argument("--long-memory", action="store_true", help="Opt in to model-based long-term memory")
+    parser.add_argument("--personal-understanding", action="store_true",
+                        help="Opt in to evidence-backed, revisable personal understanding")
     parser.add_argument("--semantic-memory", action="store_true", help="Opt in to an extra model call for memory selection")
     parser.add_argument("--comprehensive-memory", action="store_true", help="Opt in to dated multi-topic memory retrieval")
     parser.add_argument("--improved-memory", action="store_true", help="Experimental bounded semantic scan")
@@ -41,6 +44,8 @@ def main() -> int:
         parser.error("--semantic-memory requires --long-memory")
     if args.demo and args.long_memory:
         parser.error("--long-memory requires a real model")
+    if args.demo and args.personal_understanding:
+        parser.error("--personal-understanding requires a real model")
 
     db_path = args.db if args.db is not None else (
         "data/demo.sqlite3" if args.demo else "data/conversations.sqlite3")
@@ -61,6 +66,7 @@ def main() -> int:
             os.environ.get("BECOMING_EMBEDDING_MODEL", "")) if args.embedding_memory else None)
         store = SQLiteConversationStore(db_path)
         growth = GrowthStore(growth_path) if args.growth else None
+        understanding = PersonalUnderstanding(store, model) if args.personal_understanding else None
     except (ValueError, OSError, sqlite3.Error) as exc:
         if "store" in locals():
             store.close()
@@ -78,14 +84,18 @@ def main() -> int:
         print(f"Memory startup failed: {exc}", file=sys.stderr)
         return 1
 
-    agent = (GrowthAgent(model, store, growth, long_memory=memory)
-             if growth is not None else Agent(model, store, long_memory=memory))
+    agent = (GrowthAgent(model, store, growth, long_memory=memory,
+                         personal_understanding=understanding)
+             if growth is not None else Agent(model, store, long_memory=memory,
+                                              personal_understanding=understanding))
     print("Becoming | " + ("离线模拟" if args.demo else "真实模型（输入及选中的历史资料会发送到配置服务）"))
     print("/exit 退出 | /clear 清除对话及关联长期记忆")
     if growth is not None:
         print("成长辅助已启用；成长记录保存在独立数据库。")
         print("/confirm <token> 确认变更 | /cancel 取消 | /clear-growth 清除全部成长记录（需二次确认）")
         print("清除对话不会删除成长记录；删除成长记录不会清除对话或长期记忆中的副本。")
+    if understanding is not None:
+        print("动态个人理解已启用：重要纠正即时处理，普通证据最多每 5 轮批量分析；相关证据可能随请求发送。")
     if memory is not None:
         print("长期记忆已启用：每轮回复后会额外调用模型提取；相关历史原话可能随请求发送。")
         if args.improved_memory:
@@ -100,12 +110,18 @@ def main() -> int:
         print("删除记忆不删除原始对话；/clear 清除对话与关联长期记忆，保留阻止写入的槽位名称。")
 
     pending_growth_clear = None
+    understanding_flushed = False
     try:
         while True:
             text = input("你：").strip()
             if text == "/exit":
                 if growth is not None:
                     agent.reply("/cancel")
+                if understanding is not None:
+                    event = agent.flush_personal_understanding()
+                    understanding_flushed = True
+                    if event.errors:
+                        print("Personal understanding warning: " + ", ".join(event.errors), file=sys.stderr)
                 break
             if text == "/clear-growth":
                 if growth is None:
@@ -140,7 +156,7 @@ def main() -> int:
                 agent.reply("/cancel")  # memory commands must not leave a stale growth proposal alive
             if text == "/clear":
                 store.clear()
-                print("对话历史及其关联长期记忆已清除（逻辑删除）。")
+                print("对话历史及其关联长期记忆、个人理解证据已清除（逻辑删除）。")
                 if growth is not None:
                     print("独立成长记录仍保留；如需清除请使用 /clear-growth。")
                 continue
@@ -175,6 +191,9 @@ def main() -> int:
                 memory_event = agent.last_memory_event
                 if memory_event.errors:
                     print("Memory warning: " + ", ".join(memory_event.errors), file=sys.stderr)
+                understanding_event = agent.last_understanding_event
+                if understanding_event.errors:
+                    print("Personal understanding warning: " + ", ".join(understanding_event.errors), file=sys.stderr)
                 if growth is not None and agent.last_event and agent.last_event.get("status") in ("rejected", "failed"):
                     print("Growth tool warning: " + agent.last_event["status"], file=sys.stderr)
             except (ModelError, ValueError, sqlite3.Error) as exc:
@@ -185,6 +204,13 @@ def main() -> int:
         print(f"Storage error: {exc}", file=sys.stderr)
         return 1
     finally:
+        if understanding is not None and not understanding_flushed:
+            try:
+                event = agent.flush_personal_understanding()
+                if event.errors:
+                    print("Personal understanding warning: " + ", ".join(event.errors), file=sys.stderr)
+            except (sqlite3.Error, ValueError, ModelError):
+                print("Personal understanding warning: flush_failed", file=sys.stderr)
         if growth is not None:
             growth.close()
         store.close()
