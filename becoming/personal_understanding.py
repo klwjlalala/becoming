@@ -406,13 +406,16 @@ class PersonalUnderstanding:
                 );
                 CREATE INDEX IF NOT EXISTS understanding_jobs_ready ON understanding_jobs(status,id);
                 CREATE INDEX IF NOT EXISTS understanding_claim_status ON understanding_claims(status,updated_at);
-                CREATE TRIGGER IF NOT EXISTS prune_understanding_after_evidence_delete
+                DROP TRIGGER IF EXISTS prune_understanding_after_evidence_delete;
+                CREATE TRIGGER prune_understanding_after_evidence_delete
                 AFTER DELETE ON understanding_evidence
                 BEGIN
                     DELETE FROM understanding_claim_versions
                     WHERE id NOT IN (SELECT DISTINCT claim_version_id FROM understanding_claim_evidence);
                     DELETE FROM understanding_revisions
                     WHERE id NOT IN (SELECT DISTINCT revision_id FROM understanding_revision_evidence);
+                    DELETE FROM understanding_revisions
+                    WHERE from_version_id IS NULL AND to_version_id IS NULL;
                     UPDATE understanding_claim_versions
                     SET status='active'
                     WHERE status='superseded'
@@ -427,6 +430,64 @@ class PersonalUnderstanding:
                               WHERE claim_id=understanding_claims.id
                           )
                       );
+                    UPDATE understanding_claim_versions
+                    SET status='active'
+                    WHERE status='disputed'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM understanding_claim_evidence ce
+                          WHERE ce.claim_version_id=understanding_claim_versions.id
+                            AND ce.relation='counter'
+                      );
+                    UPDATE understanding_claim_versions
+                    SET status='active',user_validation='unconfirmed'
+                    WHERE status='rejected'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM understanding_claim_evidence ce
+                          WHERE ce.claim_version_id=understanding_claim_versions.id
+                            AND ce.relation='counter'
+                      );
+                    UPDATE understanding_claim_versions
+                    SET user_validation='unconfirmed'
+                    WHERE user_validation='confirmed'
+                      AND claim_id IN (
+                          SELECT c.id FROM understanding_claims c
+                          WHERE NOT EXISTS (
+                              SELECT 1 FROM understanding_revisions r
+                              WHERE r.claim_id=c.id AND r.operation='CONFIRM'
+                          )
+                      );
+                    UPDATE understanding_claim_versions
+                    SET support_level=CASE
+                        WHEN EXISTS (
+                            SELECT 1 FROM understanding_claim_evidence ce
+                            WHERE ce.claim_version_id=understanding_claim_versions.id
+                              AND ce.relation='counter'
+                        ) THEN 'low'
+                        WHEN user_validation='confirmed' THEN 'high'
+                        WHEN (
+                            SELECT COUNT(DISTINCT e.source_turn_id)
+                            FROM understanding_claim_evidence ce
+                            JOIN understanding_evidence e ON e.id=ce.evidence_id
+                            WHERE ce.claim_version_id=understanding_claim_versions.id
+                              AND ce.relation IN ('support','qualifies')
+                        )>=3
+                        AND (
+                            SELECT COUNT(DISTINCT substr(e.recorded_at,1,10))
+                            FROM understanding_claim_evidence ce
+                            JOIN understanding_evidence e ON e.id=ce.evidence_id
+                            WHERE ce.claim_version_id=understanding_claim_versions.id
+                              AND ce.relation IN ('support','qualifies')
+                        )>=2 THEN 'high'
+                        WHEN (
+                            SELECT COUNT(DISTINCT e.source_turn_id)
+                            FROM understanding_claim_evidence ce
+                            JOIN understanding_evidence e ON e.id=ce.evidence_id
+                            WHERE ce.claim_version_id=understanding_claim_versions.id
+                              AND ce.relation IN ('support','qualifies')
+                        )>=2 THEN 'medium'
+                        ELSE 'low'
+                    END
+                    WHERE id IN (SELECT DISTINCT claim_version_id FROM understanding_claim_evidence);
                     UPDATE understanding_claims
                     SET current_version=COALESCE((
                         SELECT MAX(version) FROM understanding_claim_versions
@@ -440,6 +501,17 @@ class PersonalUnderstanding:
                     WHERE current_version NOT IN (
                         SELECT version FROM understanding_claim_versions
                         WHERE claim_id=understanding_claims.id
+                    );
+                    UPDATE understanding_claims
+                    SET status=(
+                        SELECT status FROM understanding_claim_versions
+                        WHERE claim_id=understanding_claims.id
+                          AND version=understanding_claims.current_version
+                    )
+                    WHERE EXISTS (
+                        SELECT 1 FROM understanding_claim_versions
+                        WHERE claim_id=understanding_claims.id
+                          AND version=understanding_claims.current_version
                     );
                     DELETE FROM understanding_claims
                     WHERE id NOT IN (SELECT DISTINCT claim_id FROM understanding_claim_versions);
