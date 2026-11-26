@@ -15,7 +15,7 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/feat/long-term-memory-v1' &&
-      github.event.head_commit.message == 'run authorized memory quality-002 and quality-003 once 2026-11-26'
+      github.event.head_commit.message == 'run authorized V1.4 memory quality-002 and quality-003 once 2026-11-26'
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -41,6 +41,7 @@ jobs:
           BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
           BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
           QUALITY_CASE: ${{ matrix.case }}
+          BECOMING_EMBEDDING_MODEL: ${{ secrets.BECOMING_EMBEDDING_MODEL }}
         run: |
           set -eu
           for key in BECOMING_BASE_URL BECOMING_API_KEY BECOMING_MODEL; do
@@ -52,5 +53,11 @@ jobs:
           marker=$(python -c 'import uuid; print(uuid.uuid4())')
           echo "::stop-commands::$marker"
           trap 'echo "::$marker::"' EXIT
-          python -m evaluation.memory_quality --live --case "$QUALITY_CASE" --output "$QUALITY_CASE.json"
+          args=(--live --improved --case "$QUALITY_CASE" --output "$QUALITY_CASE.json")
+          if [ "$QUALITY_CASE" = quality-003 ] && [ -n "$BECOMING_EMBEDDING_MODEL" ]; then
+            args+=(--embedding)
+          else
+            echo "Embedding comparison not configured for this scenario; running scan only."
+          fi
+          python -m evaluation.memory_quality "${args[@]}"
           cat "$QUALITY_CASE.json"
