@@ -207,13 +207,16 @@ class BackgroundWorker:
             manager.observe_turn(
                 turn_id, user_text, assistant_text, process=False
             )
-            event = manager.process_pending(limit=5, retry_failed=True)
+            manager.process_pending(limit=5, retry_failed=True)
             manager.resolve_deferred_confirmations()
             internal = self.db.execute("""
                 SELECT status,attempts FROM understanding_jobs
                 WHERE job_key=?
             """, (f"turn:{turn_id}",)).fetchone()
-            if event.errors or (internal and internal[0] != "done"):
+            # process_pending may handle a batch containing other turns.
+            # Only this source turn's durable job status decides whether its
+            # generic background job has succeeded.
+            if internal is None or internal[0] != "done":
                 raise RuntimeError("personal_understanding_update_failed")
         self._finish(job["id"], "done")
 
