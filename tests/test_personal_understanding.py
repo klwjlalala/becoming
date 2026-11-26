@@ -401,6 +401,14 @@ class PersonalUnderstandingTests(unittest.TestCase):
         engine.process_pending()
         self.assertEqual(engine.list_claims()[0].support_level, "high")
 
+
+    def test_confirmation_classifier_does_not_match_ambiguous_substrings(self):
+        engine, model = self.make_engine()
+        self.assertIsNone(engine._confirmation_kind("对不起，我刚才没听清。"))
+        self.assertIsNone(engine._confirmation_kind("我对这个问题还有疑问。"))
+        self.assertEqual(engine._confirmation_kind("对，我认可这个理解。"), "confirmed")
+        self.assertEqual(engine._confirmation_kind("不是，我的意思不同。"), "rejected")
+
     def test_store_mismatch_and_invalid_limits(self):
         other = SQLiteConversationStore(":memory:")
         self.addCleanup(other.close)
