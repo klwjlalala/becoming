@@ -55,7 +55,9 @@ class PersonalUnderstandingFixtureTests(unittest.TestCase):
         self.assertTrue({
             "explicit_correction", "contextual_contradiction", "goal_change",
             "self_reinterpretation", "natural_retrieval", "no_irrelevant_retrieval",
+            "meaningful_experience_preservation",
         } <= required)
+        self.assertTrue(any("山顶" in turn["text"] for turn in self.data["turns"]))
 
     def test_noise_and_final_synthesis_are_present(self):
         turns = self.data["turns"]
