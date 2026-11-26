@@ -12,7 +12,10 @@ concurrency:
   cancel-in-progress: false
 jobs:
   evaluate:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/long-term-memory-v1' && github.event.head_commit.message == 'test(memory): authorize one-off quality-001 run 2026-11-26'
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/feat/long-term-memory-v1' &&
+      github.event.head_commit.message == 'run authorized memory quality-001 once 2026-11-26'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
