@@ -483,6 +483,23 @@ class PersonalUnderstandingTests(unittest.TestCase):
         self.assertEqual(restored.status, "active")
         self.assertEqual(engine.list_revisions(claim.id)[-1]["operation"], "CREATE")
 
+
+    def test_running_jobs_are_recovered_after_reopening_engine(self):
+        model = ScriptedModel(create_proposal())
+        engine = PersonalUnderstanding(self.store, model)
+        turn_id = self.store.append_turn("我更在意能自己安排时间。", "明白。")
+        engine._enqueue(turn_id, "normal")
+        self.store.connection.execute(
+            "UPDATE understanding_jobs SET status='running' WHERE source_turn_id=?", (turn_id,))
+        recovered = PersonalUnderstanding(self.store, model)
+        event = recovered.process_pending()
+        self.assertFalse(event.errors)
+        self.assertEqual(len(recovered.list_claims()), 1)
+        status = self.store.connection.execute(
+            "SELECT status FROM understanding_jobs WHERE source_turn_id=?", (turn_id,)
+        ).fetchone()[0]
+        self.assertEqual(status, "done")
+
     def test_store_mismatch_and_invalid_limits(self):
         other = SQLiteConversationStore(":memory:")
         self.addCleanup(other.close)
