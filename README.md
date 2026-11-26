@@ -70,7 +70,9 @@ PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前
 - becoming/models.py：可替换模型接口、模拟模型、OpenAI-compatible 适配器
 - becoming/memory.py：原始对话持久化（不是长期语义记忆）
 - becoming/prompts.py：基础角色提示词
-- becoming/__main__.py：命令行入口\n- becoming/api.py：版本化 FastAPI HTTP 接口\n- becoming/api_runtime.py：单用户服务运行时与 Agent 装配
+- becoming/__main__.py：命令行入口
+- becoming/api.py：版本化 FastAPI HTTP 接口
+- becoming/api_runtime.py：单用户服务运行时与 Agent 装配
 - docs/architecture.md：当前设计与后续研究边界
 - tests/：确定性功能测试及真实模型显式能力调用集成测试
 - evaluation/：智能体效果评测（最小框架）
@@ -83,7 +85,8 @@ PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前
 - 效果评测：`python -m evaluation`，离线列出通用用例；`python -m evaluation.personal_understanding` 校验 30 轮个人理解场景。
 - 真实模型个人理解集成：`python -m unittest discover -s tests -p 'live_personal_understanding.py' -v`，仅显式执行。
 - 30 轮纵向评测：`python -m evaluation.personal_understanding --live --max-calls 80 --output artifacts/personal-understanding-live.json`，需人工审查，不自动评分。
-- API HTTP 联调测试随默认 CI 运行：启动真实 loopback 服务并通过 HTTP 请求验证会话、聊天、成长变更和数据清除。\n- 真实模型效果/功能测试仍通过手动 Actions 运行，详见 [测试说明](docs/testing.md)。
+- API HTTP 联调测试随默认 CI 运行：启动真实 loopback 服务并通过 HTTP 请求验证会话、聊天、成长变更和数据清除。
+- 真实模型效果/功能测试仍通过手动 Actions 运行，详见 [测试说明](docs/testing.md)。
 
 ## 开发原则
 
