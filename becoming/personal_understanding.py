@@ -1104,20 +1104,27 @@ class PersonalUnderstanding:
             JOIN understanding_claim_versions v ON v.id=p.claim_version_id
             WHERE p.status='pending' ORDER BY p.id DESC
         """).fetchall()
-        if not pending_rows:
+        eligible=[]
+        for row in pending_rows:
+            next_turn=self.db.execute("""
+                SELECT MIN(id) FROM turns
+                WHERE conversation_id=(
+                    SELECT conversation_id FROM turns WHERE id=?
+                ) AND id>?
+            """,(row[3],row[3])).fetchone()[0]
+            if next_turn == current_turn_id:
+                eligible.append(row)
+        if not eligible:
             return ()
-        # A confirmation is valid only in the immediately following transcript turn.
-        eligible=[row for row in pending_rows if row[3]==current_turn_id-1]
-        pending=eligible[0] if eligible else None
+        pending=eligible[0]
+        # Only expire proposals whose immediate next turn is this one.
+        # Pending confirmations in other conversations remain independent.
         with self.db:
-            for row in pending_rows:
-                if pending is None or row[0]!=pending[0]:
-                    self.db.execute("""
-                        UPDATE understanding_pending_confirmations
-                        SET status='expired',resolved_at=? WHERE id=?
-                    """,(_now(),row[0]))
-        if pending is None:
-            return ()
+            for row in eligible[1:]:
+                self.db.execute("""
+                    UPDATE understanding_pending_confirmations
+                    SET status='expired',resolved_at=? WHERE id=?
+                """,(_now(),row[0]))
         kind=self._confirmation_kind(text)
         with self.db:
             version_row=self.db.execute(
@@ -1187,6 +1194,25 @@ class PersonalUnderstanding:
                 UPDATE understanding_pending_confirmations SET status=?,resolved_at=? WHERE id=?
             """,(kind,now,pending[0]))
         return (claim_id,)
+
+    def resolve_deferred_confirmations(self) -> tuple[str,...]:
+        """Resolve confirmations whose next user turn arrived before the worker."""
+        rows=self.db.execute("""
+            SELECT p.source_turn_id,n.id,n.user_text
+            FROM understanding_pending_confirmations p
+            JOIN turns source ON source.id=p.source_turn_id
+            JOIN turns n ON n.id=(
+                SELECT MIN(next_turn.id) FROM turns next_turn
+                WHERE next_turn.conversation_id=source.conversation_id
+                  AND next_turn.id>source.id
+            )
+            WHERE p.status='pending'
+            ORDER BY p.id
+        """).fetchall()
+        resolved=[]
+        for source_turn_id,next_turn_id,user_text in rows:
+            resolved.extend(self.resolve_pending_confirmation(user_text,next_turn_id))
+        return tuple(dict.fromkeys(resolved))
 
     def pending_confirmations(self) -> list[dict]:
         rows=self.db.execute("""
