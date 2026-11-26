@@ -135,6 +135,13 @@ class GrowthAgent:
     def last_memory_event(self):
         return self.agent.last_memory_event
 
+    @property
+    def last_understanding_event(self):
+        return self.agent.last_understanding_event
+
+    def flush_personal_understanding(self):
+        return self.agent.flush_personal_understanding()
+
     def _record_control_event(self, user, assistant):
         try:
             self.transcript.append_turn(user, assistant)
