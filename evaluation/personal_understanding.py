@@ -16,6 +16,25 @@ from becoming.personal_understanding import PersonalUnderstanding
 FIXTURE = Path(__file__).with_name("personal_understanding_cases.json")
 
 
+class DatedSQLiteConversationStore(SQLiteConversationStore):
+    """Conversation store that gives fixture turns their simulated event dates."""
+
+    def __init__(self):
+        self.simulated_day = None
+        super().__init__(":memory:")
+
+    def append_turn(self, user: str, assistant: str) -> int:
+        turn_id = super().append_turn(user, assistant)
+        if self.simulated_day is not None:
+            timestamp = f"{self.simulated_day}T12:00:00+00:00"
+            with self.connection:
+                self.connection.execute(
+                    "UPDATE turns SET created_at=? WHERE id=?",
+                    (timestamp, turn_id),
+                )
+        return turn_id
+
+
 class BudgetedModel:
     def __init__(self, model, limit: int):
         self.model = model
@@ -80,7 +99,7 @@ def run_live(max_calls: int, output: str | None = None):
     )
     model = BudgetedModel(base, max_calls)
 
-    dynamic_store = SQLiteConversationStore(":memory:")
+    dynamic_store = DatedSQLiteConversationStore()
     dynamic_understanding = PersonalUnderstanding(dynamic_store, model)
     dynamic_agent = Agent(
         model, dynamic_store, history_turns=0,
@@ -88,6 +107,7 @@ def run_live(max_calls: int, output: str | None = None):
     )
     dynamic_turns = []
     for item in fixture["turns"][:-1]:
+        dynamic_store.simulated_day = item["day"]
         record = {"day": item["day"], "user": item["text"]}
         try:
             record["assistant"] = dynamic_agent.reply(item["text"])
@@ -100,6 +120,7 @@ def run_live(max_calls: int, output: str | None = None):
 
     flush_event = asdict(dynamic_agent.flush_personal_understanding())
     final_user = fixture["turns"][-1]["text"]
+    dynamic_store.simulated_day = fixture["turns"][-1]["day"]
     dynamic_final = None
     try:
         dynamic_final = dynamic_agent.reply(final_user)
@@ -118,7 +139,8 @@ def run_live(max_calls: int, output: str | None = None):
 
     # Baseline has the same zero-turn recent-history window, but no persistent
     # personal-understanding context. Only the final synthesis request is needed.
-    baseline_store = SQLiteConversationStore(":memory:")
+    baseline_store = DatedSQLiteConversationStore()
+    baseline_store.simulated_day = fixture["turns"][-1]["day"]
     baseline_agent = Agent(model, baseline_store, history_turns=0)
     baseline_final = None
     try:
@@ -129,6 +151,8 @@ def run_live(max_calls: int, output: str | None = None):
     report = {
         "fixture": fixture["id"],
         "fictional_data_only": True,
+        "simulated_timestamps": True,
+        "timestamp_basis": "Each fixture day is injected into turns.created_at before the understanding update engine reads the turn.",
         "validation": validation,
         "model": os.environ["BECOMING_MODEL"],
         "max_calls": max_calls,
