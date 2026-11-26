@@ -76,6 +76,22 @@ class CLITests(unittest.TestCase):
         self.assertIn("成长辅助已启用", result.stdout)
         self.assertIn("Becoming：", result.stdout)
 
+    def test_all_optional_modules_can_start_together(self):
+        with patch("sys.argv", [
+            "becoming", "--growth", "--long-memory", "--comprehensive-memory",
+            "--personal-understanding", "--db", ":memory:",
+            "--growth-db", ":memory:",
+        ]), patch("becoming.__main__.OpenAICompatibleModel", return_value=object()), \
+             patch("builtins.input", side_effect=["/exit"]), \
+             patch("sys.stdout", new_callable=StringIO) as stdout, \
+             patch("sys.stderr", new_callable=StringIO) as stderr:
+            self.assertEqual(main(), 0)
+            output = stdout.getvalue()
+            self.assertIn("成长辅助已启用", output)
+            self.assertIn("长期记忆已启用", output)
+            self.assertIn("动态个人理解已启用", output)
+            self.assertNotIn("Traceback", stderr.getvalue())
+
     def test_growth_database_requires_separate_path(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = str(Path(tmp) / "same.sqlite")
