@@ -577,9 +577,11 @@ class PersonalUnderstanding:
             and any(cue in lowered for cue in PERSONAL_CORRECTION_CUES)
         )
 
-    def list_claims(self, *, include_disputed: bool = True, limit: int = 100) -> list[Claim]:
-        if not 0 <= limit <= 200:
-            raise ValueError("claim limit out of range")
+    def list_claims(
+        self, *, include_disputed: bool = True, limit: int = 100, offset: int = 0
+    ) -> list[Claim]:
+        if not 0 <= limit <= 200 or type(offset) is not int or offset < 0:
+            raise ValueError("claim pagination out of range")
         statuses = ("active", "disputed") if include_disputed else ("active",)
         marks = ",".join("?" for _ in statuses)
         rows = self.db.execute(f"""
@@ -591,8 +593,8 @@ class PersonalUnderstanding:
             WHERE c.status IN ({marks}) AND v.status IN ('active','disputed')
               AND EXISTS (SELECT 1 FROM understanding_claim_evidence ce
                           WHERE ce.claim_version_id=v.id)
-            ORDER BY c.updated_at DESC,c.id LIMIT ?
-        """, (*statuses, limit)).fetchall()
+            ORDER BY c.updated_at DESC,c.id LIMIT ? OFFSET ?
+        """, (*statuses, limit, offset)).fetchall()
         return [Claim(r[0],r[1],r[2],r[3],r[4],json.loads(r[5]),r[6],r[7],r[8],r[9],r[10],r[11])
                 for r in rows]
 
