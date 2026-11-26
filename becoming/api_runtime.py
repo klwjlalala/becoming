@@ -63,12 +63,10 @@ class AppRuntime:
         # reuse these tables without rerunning DDL or resetting live jobs.
         bootstrap_model = self.model or DemoModel()
         default_store = self.store.for_conversation("default")
-        if self.enable_long_memory:
-            LongMemory(default_store, bootstrap_model)
-        if self.enable_personal_understanding:
-            PersonalUnderstanding(
-                default_store, bootstrap_model, recover_running_jobs=False
-            )
+        LongMemory(default_store, bootstrap_model)
+        PersonalUnderstanding(
+            default_store, bootstrap_model, recover_running_jobs=False
+        )
         self.agents: dict[str, GrowthAgent] = {}
         self.pending_growth_changes: dict[str, dict] = {}
         self.pending_data_clears: set[str] = set()
