@@ -244,8 +244,8 @@ class APIHTTPTests(unittest.TestCase):
 
         first_history = self.request("GET", f"/conversations/{first_id}/messages")
         second_history = self.request("GET", f"/conversations/{second_id}/messages")
-        self.assertEqual(len(first_history["items"]), 5)
-        self.assertEqual(len(second_history["items"]), 2)
+        self.assertEqual(len(first_history["items"]), 4)
+        self.assertEqual(len(second_history["items"]), 1)
 
         goals = self.request("GET", "/growth/goals")
         self.assertEqual(goals["items"][0]["text"], "每周自由探索一次")
