@@ -1,0 +1,43 @@
+name: Agent effect evaluation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/effect-evaluation.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-effect-evaluation
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Run initial agent effect evaluation')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate functional baseline
+        run: python -m unittest discover -s tests -v
+      - name: Validate effect cases
+        run: python -m evaluation
+      - name: Evaluate three synthetic scenarios
+        env:
+          BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
+          BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
+          BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
+        run: |
+          marker=$(python -c 'import uuid; print(uuid.uuid4())')
+          echo "::stop-commands::$marker"
+          trap 'echo "::$marker::"' EXIT
+          python -m evaluation --live --case intent-001
+          python -m evaluation --live --case intent-002
+          python -m evaluation --live --case intent-003
