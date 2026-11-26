@@ -59,7 +59,8 @@ API 不提供读取密钥的接口。运行时通过 HTTP 配置的 API Key 只�
 | POST | /growth/changes | 生成成长变更预览 |
 | POST | /growth/changes/{token}/confirm | 确认预览并提交 |
 | POST | /growth/changes/{token}/cancel | 取消预览 |
-| GET | /memories | 查看长期记忆 |\n| DELETE | /memories/{key} | 删除记忆槽位并阻止重新写入 |
+| GET | /memories | 查看长期记忆 |
+| DELETE | /memories/{key} | 删除记忆槽位并阻止重新写入 |
 | POST | /memories/{key}/allow | 允许未来重新写入该槽位 |
 | GET | /understanding/claims | 查看动态个人理解 |
 | GET | /understanding/claims/{id} | 查看命题及版本历史 |
