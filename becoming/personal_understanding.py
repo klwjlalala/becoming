@@ -183,6 +183,8 @@ def parse_proposal(raw: str, turns: list[dict], claims: list[Claim]) -> dict:
         source = turn_by_index[turn_index]["user_text"]
         if not complete_quote(quote, source):
             raise ValueError("evidence quote is not a complete source-bound clause")
+        if event_time is not None and event_time not in source:
+            raise ValueError("event time must be explicitly present in source text")
         if SECRET.search(quote) or SENSITIVE.search(quote):
             raise ValueError("sensitive or credential-like evidence rejected")
         evidence_by_ref[ref] = {
@@ -242,12 +244,14 @@ def parse_proposal(raw: str, turns: list[dict], claims: list[Claim]) -> dict:
         if not isinstance(refs, list) or len(refs) > 12:
             raise ValueError("invalid operation evidence")
         normalized_refs = []
+        seen_evidence_refs = set()
         for relation_item in refs:
             if not isinstance(relation_item, dict) or set(relation_item) != {"ref", "relation"}:
                 raise ValueError("invalid evidence relation")
             ref, relation = relation_item["ref"], relation_item["relation"]
-            if ref not in evidence_by_ref or relation not in RELATIONS:
-                raise ValueError("operation references invalid evidence")
+            if ref not in evidence_by_ref or relation not in RELATIONS or ref in seen_evidence_refs:
+                raise ValueError("operation references invalid or duplicate evidence")
+            seen_evidence_refs.add(ref)
             normalized_refs.append((ref, relation))
         relations = {relation for _, relation in normalized_refs}
         if operation == "EXPIRE":
