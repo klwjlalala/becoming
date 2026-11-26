@@ -1058,7 +1058,8 @@ class PersonalUnderstanding:
         if retry_failed:
             states="(status='pending' OR (status='failed' AND attempts<3))"
         rows=self.db.execute(
-            f"SELECT id FROM understanding_jobs WHERE {states} ORDER BY id LIMIT ?",(limit,)
+            f"SELECT id FROM understanding_jobs WHERE {states} "
+            "ORDER BY CASE WHEN kind='immediate' THEN 0 ELSE 1 END,id LIMIT ?",(limit,)
         ).fetchall()
         return self._process_jobs([r[0] for r in rows])
 
