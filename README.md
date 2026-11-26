@@ -60,3 +60,15 @@ PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前
 ### V1.1 实验功能
 
 `python -m becoming --long-memory --semantic-memory` 可选模型语义筛选（每轮最多额外一次调用，最多发送40条记忆原话）。`/forget <key>` 同时阻止同 key 后续写入；`/allow <key>` 解除阻止，不恢复原数据。`/clear` 保留阻止槽位名称。原始对话与近义别名不受单槽位删除保证。提取时会发送有限旧记忆原话供修订判断。
+
+
+### 综合长期记忆（实验，可选）
+
+    python -m becoming --long-memory --comprehensive-memory
+
+在已有记忆模式基础上支持 UTC 陈述记录日期范围、多主题召回及明确历史回顾中的旧版本。与 --semantic-memory 二选一；最多两次同步检索模型调用。无需迁移数据库。仍需真实模型验证。
+
+    python -m evaluation.cross_time
+    python -m evaluation.cross_time --live --case growth-001
+
+对比无记忆、V1.1 和综合检索的同一虚构场景，真实模型命令仅手动执行。

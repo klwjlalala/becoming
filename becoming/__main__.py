@@ -7,6 +7,7 @@ import sys
 from .agent import Agent
 from .memory import SQLiteConversationStore
 from .long_memory import LongMemory
+from .memory_search import ComprehensiveMemory
 from .models import DemoModel, OpenAICompatibleModel, ModelError
 
 
@@ -16,7 +17,10 @@ def main() -> int:
     parser.add_argument("--db", default=None, help="SQLite file or :memory:")
     parser.add_argument("--long-memory", action="store_true", help="Opt in to model-based long-term memory")
     parser.add_argument("--semantic-memory", action="store_true", help="Opt in to an extra model call for memory selection")
+    parser.add_argument("--comprehensive-memory", action="store_true", help="Opt in to dated multi-topic memory retrieval")
     args = parser.parse_args()
+    if args.comprehensive_memory and (not args.long_memory or args.semantic_memory):
+        parser.error("--comprehensive-memory requires --long-memory and replaces --semantic-memory")
     if args.semantic_memory and not args.long_memory:
         parser.error("--semantic-memory requires --long-memory")
     if args.demo and args.long_memory:
@@ -39,7 +43,8 @@ def main() -> int:
         return 1
 
     try:
-        memory = LongMemory(store, model, semantic=args.semantic_memory) if args.long_memory else None
+        memory = (ComprehensiveMemory(store, model) if args.comprehensive_memory else
+                  LongMemory(store, model, semantic=args.semantic_memory)) if args.long_memory else None
     except sqlite3.Error as exc:
         store.close()
         print(f"Memory startup failed: {exc}", file=sys.stderr)
@@ -49,6 +54,8 @@ def main() -> int:
     print("/exit 退出 | /clear 清除当前对话历史")
     if memory is not None:
         print("长期记忆已启用：每轮回复后额外发送当前输入及有限历史记忆原话；相关记忆可能随回复请求发送。")
+        if args.comprehensive_memory:
+            print("综合检索已启用：最多增加两次模型调用（检索条件解析与有限历史候选筛选）。记录日期按 UTC。")
         if args.semantic_memory:
             print("语义检索已启用：最多40条候选原话发送给模型做筛选，增加一次模型调用。")
         print("/memories 查看 | /forget <key> 删除并阻止同槽位重新写入 | /allow <key> 恢复未来写入")

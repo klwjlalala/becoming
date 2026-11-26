@@ -52,5 +52,6 @@ class Agent:
             except (ModelError, sqlite3.Error, ValueError):
                 errors.append("extract_failed")
         self.last_memory_event = MemoryEvent(
-            tuple(m.id for m in memories), written, tuple(errors))
+            tuple(m.id for m in memories), written, tuple(errors),
+            self.long_memory.last_search if self.long_memory is not None else None)
         return reply
