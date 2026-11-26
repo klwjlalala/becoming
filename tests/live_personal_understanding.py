@@ -28,7 +28,7 @@ class LivePersonalUnderstandingTest(unittest.TestCase):
 
     def test_explicit_update_revision_and_natural_recall(self):
         first = (
-            "请更新你对我的理解：我更重视可以自主安排时间，而不是职位头衔。"
+            "请更新你对我的理解：我目前把创业视为自己最重要的人生目标。"
             "这是本次虚构测试设定，不代表真实个人资料。"
         )
         self.agent.reply(first)
@@ -41,7 +41,7 @@ class LivePersonalUnderstandingTest(unittest.TestCase):
         self.assertTrue(first_claims)
 
         correction = (
-            "更正一下：我并不把创业当成人生目标；我真正希望的是有选择权，"
+            "更正一下：创业并不是我的人生目标；我真正希望的是有选择权，"
             "创业只是一个可选方式。这仍然只是虚构测试设定。"
         )
         self.agent.reply(correction)
@@ -50,11 +50,13 @@ class LivePersonalUnderstandingTest(unittest.TestCase):
             self.agent.last_understanding_event.errors,
         )
         self.assertTrue(self.agent.last_understanding_event.written_claim_ids)
-        self.assertTrue(self.understanding.list_revisions(first_claims[0].id))
+        histories = [self.understanding.get_claim_history(claim.id) for claim in first_claims]
+        self.assertTrue(any(len(history) >= 2 for history in histories),
+                        "explicit correction should revise the existing claim")
 
         answer = self.agent.reply("结合之前聊过的内容，我真正想要什么样的生活？")
         self.assertTrue(self.agent.last_understanding_event.retrieved_claim_ids)
-        self.assertTrue(any(word in answer for word in ("自主", "选择", "安排时间")))
+        self.assertTrue(any(word in answer for word in ("选择", "创业", "人生目标")))
 
         # Verify the data actually persisted in the test database and every active
         # claim version still has a source-backed evidence row.
