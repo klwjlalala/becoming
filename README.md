@@ -80,3 +80,6 @@ PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前
     python -m evaluation.memory_quality --live --case quality-001 --output quality-001.json
 
 三组虚构跨年对话，分别检查提取遗漏、历史修订、候选与选择阶段；三个检索模式共享同一历史快照。报告需人工审查，不自动判断质量通过。真实模式会消耗额度，尤其 quality-003（46 轮）。
+
+
+V1.3 增加来源分句校验、单轮最多12条记忆、独立提取失败隔离，以及综合检索的时间分层候选。运行方式不变；真实模型准确率与召回净收益尚待验证。

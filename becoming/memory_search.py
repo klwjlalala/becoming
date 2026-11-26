@@ -59,7 +59,7 @@ class SearchPlan:
 
 
 def candidate_pool(items: list[Memory], topics: tuple[str, ...], limit: int = SEMANTIC_POOL):
-    """Round-robin positive lexical matches per topic; recent fallback for semantic selection."""
+    """Round-robin lexical matches plus bounded historical coverage for semantic selection."""
     tokens = [terms(t) for t in topics]
     def score(m, q):
         return 3 * len(q & terms(m.key)) + len(q & terms(m.quote))
@@ -68,7 +68,10 @@ def candidate_pool(items: list[Memory], topics: tuple[str, ...], limit: int = SE
                           reverse=True)) for q in tokens]
     seen = set()
     selected = []
-    while ranked and len(selected) < limit:
+    # Reserve one quarter for time-diverse candidates when the pool overflows.
+    reserve = max(1, limit // 4) if len(items) > limit and limit >= 4 else 0
+    lexical_limit = limit - reserve
+    while ranked and len(selected) < lexical_limit:
         remaining = []
         for it in ranked:
             for m in it:
@@ -77,9 +80,19 @@ def candidate_pool(items: list[Memory], topics: tuple[str, ...], limit: int = SE
                     seen.add(m.id)
                     remaining.append(it)
                     break
-            if len(selected) == limit:
-                return selected
+            if len(selected) == lexical_limit:
+                break
         ranked = remaining
+    remaining_items = sorted((m for m in items if m.id not in seen),
+                             key=lambda m: (m.recorded_at, m.id))
+    # Evenly spaced across the remaining timeline, including oldest and newest.
+    # Unlike a recent-only fallback, old zero-overlap items get a bounded chance.
+    sample = min(reserve, len(remaining_items))
+    for i in range(sample):
+        index = i * (len(remaining_items) - 1) // max(1, sample - 1)
+        m = remaining_items[index]
+        selected.append(m)
+        seen.add(m.id)
     for m in sorted(items, key=lambda m: (m.recorded_at, m.id), reverse=True):
         if len(selected) == limit:
             break
@@ -106,11 +119,11 @@ class ComprehensiveMemory(LongMemory):
         if plan.end:
             where.append("date(t.created_at)<=?")
             args.append(plan.end)
-        sql = """SELECT m.id,m.key,m.category,m.quote,m.source_turn_id,t.created_at,m.active
+        sql = """SELECT m.id,m.key,m.category,m.quote,m.source_turn_id,t.created_at,m.active,t.user_text
                  FROM long_memories m JOIN turns t ON t.id=m.source_turn_id"""
         if where:
             sql += " WHERE " + " AND ".join(where)
-        items = [Memory(*r) for r in self.db.execute(sql, args)]
+        items = self.safe_records(self.db.execute(sql, args))
         return candidate_pool(items, plan.topics, limit)
 
     def retrieve(self, query: str, limit: int = 8) -> list[Memory]:

@@ -11,7 +11,8 @@ class QualityDiagnosticsTests(unittest.TestCase):
     def test_case_contracts_and_stress_size(self):
         self.assertEqual(len(validate_cases()), 3)
         self.assertGreater(len(CASES["quality-003"].history), 40)
-        self.assertGreater(len(CASES["quality-003"].history[0].evidence), MAX_ITEMS)
+        self.assertGreater(len(CASES["quality-003"].history[0].evidence), 3)
+        self.assertLessEqual(len(CASES["quality-003"].history[0].evidence), MAX_ITEMS)
 
     def test_audit_distinguishes_missing_span_wrong_state_and_noise(self):
         case = Case("test", (
@@ -25,7 +26,11 @@ class QualityDiagnosticsTests(unittest.TestCase):
         store.day = "2024-01-01"
         t1 = store.append_turn(case.history[0].text, "好")
         # Literal substring validity does not preserve polarity.
-        memory.write(t1, [("noise", "subjective", "喜欢吵闹"), ("hobby", "subjective", "我喜欢木雕")])
+        # Simulate pre-upgrade database corruption; current writes reject this.
+        with store.connection:
+            store.connection.execute("INSERT INTO long_memories(key,category,quote,source_turn_id) VALUES(?,?,?,?)",
+                                     ("noise", "subjective", "喜欢吵闹", t1))
+        memory.write(t1, [("hobby", "subjective", "我喜欢木雕")])
         store.connection.execute("UPDATE long_memories SET active=0 WHERE key='hobby'")
         store.day = "2024-02-01"
         t2 = store.append_turn("今天下雨", "好")
@@ -47,7 +52,7 @@ class QualityDiagnosticsTests(unittest.TestCase):
         self.assertEqual(report["model_calls"], 10)
         self.assertEqual(report["exact_span_matched"], 1)
         self.assertEqual(report["records"][0]["recorded_at_utc"], "2024-01-01 12:00:00")
-        self.assertEqual(report["probes"]["v1.2"]["diagnostics"]["hobby"], "selected")
+        self.assertEqual(report["probes"]["v1.3"]["diagnostics"]["hobby"], "selected")
         self.assertEqual(report["probes"]["v1.1"]["diagnostics"]["hobby"], "selected")
         self.assertEqual(report["probes"]["no-memory"]["event"]["retrieved_ids"], ())
         self.assertEqual(report["verdict"], "awaiting_manual_review")
@@ -55,8 +60,8 @@ class QualityDiagnosticsTests(unittest.TestCase):
             self.assertNotIn("manual only", str(call))
         self.assertEqual(len(report["records"]), 1)
 
-    def test_known_candidate_ceiling_with_zero_lexical_overlap(self):
-        # Characterize V1.2's existing limit, not a claim of real-model behavior.
+    def test_temporal_reserve_recalls_old_zero_overlap_candidate(self):
+        # Regression for the previously excluded oldest record.
         store = DatedStore(":memory:")
         self.addCleanup(store.close)
         memory = ComprehensiveMemory(store, ScriptedModel())
@@ -70,15 +75,18 @@ class QualityDiagnosticsTests(unittest.TestCase):
             memory.write(turn, [(f"book{i}", "fact", quote)])
         pool = memory.search(SearchPlan(("财务稳定",)))
         self.assertEqual(len(pool), 40)
-        self.assertNotIn(old, [m.id for m in pool])
+        self.assertIn(old, [m.id for m in pool])
         self.assertIn(old, [m.id for m in memory.search(SearchPlan(("收入",)))])
 
-    def test_known_batch_ceiling_rejects_four_exact_evidence_items(self):
+    def test_dense_batch_preserves_five_independent_evidence_items(self):
         store = DatedStore(":memory:")
         self.addCleanup(store.close)
         memory = LongMemory(store, ScriptedModel())
-        turn = store.append_turn("甲信息，乙信息，丙信息，丁信息", "好")
+        quotes = ["甲信息", "乙信息", "丙信息", "丁信息", "戊信息"]
+        turn = store.append_turn("，".join(quotes), "好")
+        ids = memory.write(turn, [(f"slot{i}", "fact", x) for i, x in enumerate(quotes)])
+        self.assertEqual(len(ids), 5)
+        self.assertEqual({m.quote for m in memory.list_active()}, set(quotes))
         with self.assertRaises(ValueError):
-            memory.write(turn, [(f"slot{i}", "fact", x) for i, x in enumerate(
-                ["甲信息", "乙信息", "丙信息", "丁信息"])])
-        self.assertEqual(memory.list_active(), [])
+            memory.write(turn, [("slot", "fact", quotes[0])] * (MAX_ITEMS + 1))
+        self.assertEqual(len(memory.list_active()), 5)

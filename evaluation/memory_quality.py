@@ -110,7 +110,7 @@ def run_case(case, model, *, progress=None):
         evidence, noise = audit(case, traces, records)
         probes = {}
         # The history and stored records are identical for every probe; no cross-arm contamination.
-        for mode in ("no-memory", "v1.1", "v1.2"):
+        for mode in ("no-memory", "v1.1", "v1.3"):
             branch = DatedStore(":memory:")
             try:
                 store.connection.backup(branch.connection)

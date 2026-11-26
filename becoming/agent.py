@@ -49,6 +49,8 @@ class Agent:
         if self.long_memory is not None:
             try:
                 written = self.long_memory.extract(turn_id, text)
+                if self.long_memory.last_extract_rejected:
+                    errors.append("extract_partial")
             except (ModelError, sqlite3.Error, ValueError):
                 errors.append("extract_failed")
         self.last_memory_event = MemoryEvent(
