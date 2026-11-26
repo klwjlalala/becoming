@@ -14,6 +14,8 @@ cd becoming
 python -m becoming --demo
 # 单一入口：真实模型 + 成长工具 + 综合长期记忆
 python -m becoming --growth --long-memory --comprehensive-memory
+# 可选开启动态个人理解（与长期记忆分开存储）
+python -m becoming --personal-understanding
 python -m unittest discover -s tests -v
 ```
 
@@ -21,7 +23,7 @@ Demo 为固定的模拟模型，不具有真实 AI 理解能力，也不会发�
 
 ## 统一服务入口（成长辅助）
 
-`python -m becoming --growth --long-memory --comprehensive-memory` 在同一对话入口组合长期记忆、自我理解、迷茫引导与成长工具。成长数据默认存于 `data/growth.sqlite3`，对话及长期记忆存于 `data/conversations.sqlite3`，可分别用 `--db` 和 `--growth-db` 指定，两个文件不能相同。`/confirm <token>` 确认变更，`/cancel` 取消，`/clear-growth` 后按提示二次确认清除成长记录。`/clear` 只清除对话及关联长期记忆，不删除独立成长记录。删除成长记录不会清除对话或长期记忆中的副本；删除对话也不会删除成长记录。SQLite 逻辑删除不保证物理擦除。
+`python -m becoming --growth --long-memory --comprehensive-memory --personal-understanding` 可在同一对话入口组合长期记忆、动态个人理解、自我探索引导与成长工具。成长数据默认存于 `data/growth.sqlite3`，对话及长期记忆存于 `data/conversations.sqlite3`，可分别用 `--db` 和 `--growth-db` 指定，两个文件不能相同。`/confirm <token>` 确认变更，`/cancel` 取消，`/clear-growth` 后按提示二次确认清除成长记录。`/clear` 只清除对话及关联长期记忆，不删除独立成长记录。删除成长记录不会清除对话或长期记忆中的副本；删除对话也不会删除成长记录。SQLite 逻辑删除不保证物理擦除。
 
 ## 接入真实模型
 
@@ -39,6 +41,7 @@ PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前
 ## 结构
 
 - becoming/agent.py：智能体入口及单轮编排
+- becoming/personal_understanding.py：Evidence/Claim/Revision 动态个人理解模型（可选）
 - becoming/models.py：可替换模型接口、模拟模型、OpenAI-compatible 适配器
 - becoming/memory.py：原始对话持久化（不是长期语义记忆）
 - becoming/prompts.py：基础角色提示词
@@ -52,7 +55,9 @@ PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前
 
 - 功能测试（离线）：`python -m unittest discover -s tests -v`，自动 CI，不消耗真实模型额度。
 - 功能测试（真实模型）：`python -m unittest discover -s tests -p 'live_*.py' -v`，显式指定能力、验证真实调用链路；仅按需执行。
-- 效果评测：`python -m evaluation`，离线列出用例；真实模型调用须显式 `--live --case <ID>`，自然场景评估需求理解、能力选择、解决效果。
+- 效果评测：`python -m evaluation`，离线列出通用用例；`python -m evaluation.personal_understanding` 校验 30 轮个人理解场景。
+- 真实模型个人理解集成：`python -m unittest discover -s tests -p 'live_personal_understanding.py' -v`，仅显式执行。
+- 30 轮纵向评测：`python -m evaluation.personal_understanding --live --max-calls 80 --output artifacts/personal-understanding-live.json`，需人工审查，不自动评分。
 - 真实 API 功能冒烟测试仍通过手动 Actions 运行，详见 [测试说明](docs/testing.md)。
 
 ## 开发原则
@@ -109,3 +114,14 @@ V1.3 增加来源分句校验、单轮最多12条记忆、独立提取失败隔�
 测试包含人生意义与纠正理解、现实约束下的决策、长期记忆生命周期、成长工具完整流程、倾听与话题切换、即时安全风险。所有输入均为虚构内容；记忆场景关闭近期历史窗口，以单独验证长期记忆。成长场景只由测试夹具确认与预期工具和 ID 完全匹配的合成操作，不代表产品自动授权。报告保留逐轮回复、实际记忆/工具事件和 SQLite 最终状态；不使用 LLM 裁判自动给出质量通过结论。完整说明见 docs/live-quality-evaluation.md。
 
 GitHub Actions 一次性执行使用仓库 Secrets：BECOMING_BASE_URL、BECOMING_API_KEY、BECOMING_MODEL。工作流仅由指定测试分支上包含工作流文件的专用提交触发，设置 60 次模型调用硬上限，并上传 JSON/Markdown 报告。真实模型步骤不进入默认 CI。
+
+
+### 动态个人理解 V1（实验、默认关闭）
+
+在真实模型配置完成后，使用：
+
+    python -m becoming --personal-understanding
+
+它与长期记忆独立存储：长期记忆保存用户明确表达的事实/经历/偏好；个人理解将多条证据关联成可修订的 Claim，并保留版本和修订记录。重要纠正会在回复后即时分析，普通证据最多每 5 轮批量处理；CLI 退出时会 flush。当前是同步原型，不是后台常驻 Agent。检索最多注入 5 条相关理解，不额外调用模型筛选；不相关时不注入。
+
+重要限制：敏感信息拦截只是有限规则与提示词约束，不构成完整隐私保护；SQLite 未加密。不要存储高敏个人信息。模型生成的理解只是候选，不是客观人格结论；用户拥有对自己的最终解释权。完整架构、边界和验收标准见 [动态个人理解 V1 设计](docs/personal-understanding-v1.md)。
