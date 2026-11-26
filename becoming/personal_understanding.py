@@ -641,18 +641,29 @@ class PersonalUnderstanding:
                 JOIN understanding_evidence e ON e.id=ce.evidence_id
                 WHERE ce.claim_version_id=? ORDER BY e.id DESC LIMIT 4
             """, (claim.version_id,)))
-            score = len(q & terms(claim.content + " " + evidence_text + " " +
-                                  json.dumps(claim.scope, ensure_ascii=False)))
-            if score:
+            overlap_score = len(q & terms(claim.content + " " + evidence_text + " " +
+                                          json.dumps(claim.scope, ensure_ascii=False)))
+            score = overlap_score
+            if overlap_score:
                 score += 2
+                if claim.support_level == "high":
+                    score += 1
             if reflective and claim.dimension in REFLECTIVE_DIMENSIONS:
                 score += 3
             if any(cue in query for cue in ("取舍", "约束", "收入", "稳定", "现实")):
                 if claim.dimension in {"constraints", "tensions"}:
                     score += 3
-            if any(cue in query for cue in ("真正想要", "想要的生活", "价值观", "人生意义")):
+            if any(cue in query for cue in ("真正想要", "想要的生活", "价值观", "人生意义", "人生方向")):
                 if claim.dimension in {"values", "motivation", "needs", "goals"}:
                     score += 2
+                meaningful_experiences = self.db.execute("""
+                    SELECT COUNT(*) FROM understanding_claim_evidence ce
+                    JOIN understanding_evidence e ON e.id=ce.evidence_id
+                    WHERE ce.claim_version_id=? AND e.kind='experience'
+                      AND ce.relation IN ('support','qualifies')
+                """, (claim.version_id,)).fetchone()[0]
+                if meaningful_experiences:
+                    score += 3
             if any(cue in query for cue in ("变化", "改变", "以前和现在")):
                 if claim.dimension in {"cognition", "self_concept", "patterns"}:
                     score += 2
