@@ -1,6 +1,7 @@
 name: Personal understanding live evaluation (manual)
 
 # Re-run after reflective retrieval was expanded to include goals and constraints.
+# A push to this branch with the dedicated trigger commit message runs the one-shot live evaluation.
 
 on:
   push:
