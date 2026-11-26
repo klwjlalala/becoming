@@ -106,13 +106,13 @@ class BackgroundWorker:
                 return None
             self.db.execute("""
                 UPDATE background_jobs
-                SET status='running',started_at=CURRENT_TIMESTAMP,
+                SET status='running',attempts=attempts+1,started_at=CURRENT_TIMESTAMP,
                     updated_at=CURRENT_TIMESTAMP
                 WHERE id=? AND status='pending'
             """, (row[0],))
             self.db.commit()
             return {"id": row[0], "kind": row[1], "source_turn_id": row[2],
-                    "attempts": row[3]}
+                    "attempts": row[3] + 1}
         except BaseException:
             self.db.rollback()
             raise
@@ -127,7 +127,7 @@ class BackgroundWorker:
             """, (status, error, job_id))
 
     def _fail(self, job: dict, error: str) -> None:
-        attempts = job["attempts"] + 1
+        attempts = job["attempts"]
         status = "failed" if attempts >= MAX_ATTEMPTS else "pending"
         delay = min(2 ** attempts, 30)
         with self.db:
