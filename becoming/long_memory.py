@@ -146,37 +146,41 @@ def select_memories(raw: str, pool: list[Memory], limit: int) -> list[Memory]:
 
 class LongMemory:
     """Shares the transcript connection; source integrity is enforced by SQLite."""
-    def __init__(self, store: SQLiteConversationStore, model: Model, *, semantic: bool = False):
+    def __init__(
+        self, store: SQLiteConversationStore, model: Model, *,
+        semantic: bool = False, initialize_schema: bool = True,
+    ):
         self.store = store
         self.model = model
         self.semantic = semantic
         self.db = store.connection
         self.last_search = None
         self.last_extract_rejected = 0
-        with self.db:
-            self.db.execute("""
-                CREATE TABLE IF NOT EXISTS long_memories (
-                    id INTEGER PRIMARY KEY,
-                    key TEXT NOT NULL,
-                    category TEXT NOT NULL CHECK(category IN ('fact','experience','subjective')),
-                    quote TEXT NOT NULL,
-                    source_turn_id INTEGER NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
-                    active INTEGER NOT NULL CHECK(active IN (0,1)) DEFAULT 1
-                )
-            """)
-            self.db.execute("""
-                CREATE UNIQUE INDEX IF NOT EXISTS one_active_memory_per_key
-                ON long_memories(key) WHERE active=1
-            """)
+        if initialize_schema:
+            with self.db:
+                self.db.execute("""
+                    CREATE TABLE IF NOT EXISTS long_memories (
+                        id INTEGER PRIMARY KEY,
+                        key TEXT NOT NULL,
+                        category TEXT NOT NULL CHECK(category IN ('fact','experience','subjective')),
+                        quote TEXT NOT NULL,
+                        source_turn_id INTEGER NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+                        active INTEGER NOT NULL CHECK(active IN (0,1)) DEFAULT 1
+                    )
+                """)
+                self.db.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS one_active_memory_per_key
+                    ON long_memories(key) WHERE active=1
+                """)
 
-        with self.db:
-            self.db.execute("CREATE TABLE IF NOT EXISTS blocked_memory_keys (key TEXT PRIMARY KEY)")
-            self.db.execute("""
-                CREATE TABLE IF NOT EXISTS long_memory_extraction_receipts (
-                    turn_id INTEGER PRIMARY KEY REFERENCES turns(id) ON DELETE CASCADE,
-                    processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+            with self.db:
+                self.db.execute("CREATE TABLE IF NOT EXISTS blocked_memory_keys (key TEXT PRIMARY KEY)")
+                self.db.execute("""
+                    CREATE TABLE IF NOT EXISTS long_memory_extraction_receipts (
+                        turn_id INTEGER PRIMARY KEY REFERENCES turns(id) ON DELETE CASCADE,
+                        processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
 
     def blocked_keys(self) -> list[str]:
         return [r[0] for r in self.db.execute("SELECT key FROM blocked_memory_keys ORDER BY key")]
