@@ -235,7 +235,7 @@ class PersonalUnderstandingTests(unittest.TestCase):
         self.assertEqual(engine.list_revisions(claim.id)[-1]["operation"], "CONFIRM")
         self.assertEqual(engine.pending_confirmations(), [])
 
-    def test_fabricated_confirmation_question_rejects_batch(self):
+    def test_fabricated_confirmation_question_is_ignored_without_blocking_claim(self):
         raw = json.loads(create_proposal())
         raw["confirmation"] = {
             "claim_id": None, "claim_ref": "c1", "expected_version": 1,
@@ -245,8 +245,9 @@ class PersonalUnderstandingTests(unittest.TestCase):
         turn_id = self.store.append_turn("我更在意能自己安排时间。", "收到。")
         engine._enqueue(turn_id, "normal")
         event = engine.process_pending()
-        self.assertEqual(event.errors, ("update_failed",))
-        self.assertEqual(engine.list_claims(), [])
+        self.assertFalse(event.errors)
+        self.assertEqual(len(engine.list_claims()), 1)
+        self.assertEqual(engine.pending_confirmations(), [])
 
     def test_ambiguous_confirmation_expires_without_guessing(self):
         raw = json.loads(create_proposal())
