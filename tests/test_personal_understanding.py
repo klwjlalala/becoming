@@ -693,7 +693,7 @@ class PersonalUnderstandingTests(unittest.TestCase):
             create_proposal("我希望有稳定的收入。", claim_ref="c2",
                             content="用户希望拥有稳定收入。", dimension="constraints"),
             create_proposal("我喜欢研究新的技术。", claim_ref="c3",
-                            content="用户喜欢研究新技术。", dimension="interests"),
+                            content="用户喜欢研究新技术。", dimension="patterns"),
         )
         engine = PersonalUnderstanding(self.store, model)
         for quote in (
