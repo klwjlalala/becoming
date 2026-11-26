@@ -210,6 +210,52 @@ class PersonalUnderstandingTests(unittest.TestCase):
         self.assertEqual(engine.list_claims()[0].version, 1)
         self.assertEqual(len(engine.get_claim_history(claim.id)), 1)
 
+    def test_high_support_claim_does_not_match_unrelated_query(self):
+        engine, model = self.make_engine(create_proposal())
+        claim = self.create_claim(engine, model)
+        with self.store.connection:
+            self.store.connection.execute(
+                "UPDATE understanding_claim_versions SET support_level='high' WHERE id=?",
+                (claim.version_id,),
+            )
+        result = engine.retrieve("顺便问一下，Python 的生成器和迭代器有什么区别？")
+        self.assertEqual(result, [])
+        self.assertEqual(engine.last_search["selected_ids"], [])
+
+    def test_meaning_query_prioritizes_event_level_experience(self):
+        mountain_quote = "上个月我一个人爬到山顶，看着下面城市里的人来来往往，突然很感动。"
+        mountain_proposal = json.dumps({
+            "evidence": [{
+                "ref": "e1", "turn_index": 0, "quote": mountain_quote,
+                "kind": "experience", "event_time": "上个月",
+            }],
+            "operations": [{
+                "operation": "CREATE", "claim_ref": "c1", "claim_id": None,
+                "expected_version": None,
+                "content": "用户曾在山顶观察城市人流时感到强烈感动。",
+                "dimension": "values", "basis": "explicit_statement",
+                "scope": {"context": "独自登山并观看城市"},
+                "temporal_scope": "一次个人经历；具体日期以来源记录为准",
+                "evidence": [{"ref": "e1", "relation": "support"}],
+                "reason": "保留具有情感意义的事件级经历，不推断稳定人格。",
+            }],
+            "confirmation": None,
+        }, ensure_ascii=False)
+        engine, model = self.make_engine(mountain_proposal, create_proposal())
+        mountain_turn = self.store.append_turn(mountain_quote, "那一刻很特别。")
+        engine._enqueue(mountain_turn, "normal")
+        engine.process_pending()
+        mountain_claim = next(
+            claim for claim in engine.list_claims() if "山顶" in claim.content
+        )
+
+        generic_turn = self.store.append_turn("我更在意能自己安排时间。", "明白。")
+        engine._enqueue(generic_turn, "normal")
+        engine.process_pending()
+        results = engine.retrieve("结合我们之前聊过的内容，你觉得我真正想要的生活是什么？")
+        self.assertGreaterEqual(len(results), 2)
+        self.assertEqual(results[0].id, mountain_claim.id)
+
     def test_listen_only_turn_skips_personal_understanding_retrieval(self):
         engine, model = self.make_engine(create_proposal())
         self.create_claim(engine, model)
