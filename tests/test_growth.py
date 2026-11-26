@@ -100,6 +100,26 @@ class GrowthTests(unittest.TestCase):
         self.assertEqual(agent.reply("查看目标"), "目前还没有成长目标。")
         self.assertEqual(agent.last_event["status"], "read")
 
+    def test_model_preview_text_is_revalidated_against_database(self):
+        goal = self.create("create_goal", text="阅读")
+        action = self.create("create_action", goal_id=goal["id"], text="睡前读十分钟")
+        payload = json.dumps({
+            "tool": "update_item",
+            "args": {"id": action["id"], "status": "done"},
+            "parent": {"id": 999, "kind": "goal", "text": "伪造父目标"},
+        }, ensure_ascii=False)
+        model = Scripted("尚未保存。请核对以下变更：\n" + payload)
+        agent = GrowthAgent(model, self.history, self.store)
+        answer = agent.reply("把刚才的行动标记为完成")
+        self.assertEqual(agent.last_event["status"], "proposed")
+        preview = agent.adapter.pending[1]
+        self.assertEqual(preview["before"]["id"], action["id"])
+        self.assertNotEqual(preview["before"].get("text"), "伪造父目标")
+        self.assertIn("/confirm ", answer)
+        agent.reply("/confirm " + agent.adapter.pending[0])
+        self.assertEqual(agent.last_event["status"], "committed")
+        self.assertEqual(self.store.read("get_goal", {"goal_id": goal["id"]})["items"][0]["status"], "done")
+
     def test_read_tools_return_actual_results_and_followup(self):
         self.create("create_goal", text="真实标记")
         model = Scripted(call("list_goals"), "你的目标如下", call("get_goal", goal_id=1), "详情")

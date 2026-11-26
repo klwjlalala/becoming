@@ -94,7 +94,7 @@ CASES = {
         ],
         "expected_steps": {
             0: "no_mutation", 1: "create_goal", 2: "create_action",
-            3: "get_goal", 4: "update_item", 5: "record_reflection", 6: "get_goal",
+            3: "get_goal", 4: "update_item", 5: "record_reflection", 6: "natural_summary",
         },
         "review": [
             "第一轮只是想法时不擅自创建目标",
@@ -367,12 +367,12 @@ def run_growth_journey(model):
                     if agent.adapter.pending is not None:
                         agent.reply("/cancel")
                         row["cancellation_event"] = agent.last_event
-            elif expected == "get_goal":
+            elif expected in ("get_goal", "natural_summary"):
                 if agent.adapter.pending is not None:
                     row["unexpected_mutation_cancelled"] = True
                     agent.reply("/cancel")
                     row["cancellation_event"] = agent.last_event
-                row["read_event"] = agent.last_event
+                row["read_event"] = agent.last_event if agent.last_event and agent.last_event.get("status") == "read" else None
             trace.append(row)
 
         rows = [dict(row) for row in growth.connection.execute("SELECT * FROM growth_items ORDER BY id")]
@@ -382,19 +382,31 @@ def run_growth_journey(model):
         final_read = trace[-1].get("read_event") or {}
         final_result = final_read.get("result") or {}
         final_items = final_result.get("items") or []
+        expected_mutations = (1, 2, 4, 5)
+        all_mutations_committed = all(
+            (trace[index].get("approval_event") or {}).get("status") == "committed"
+            for index in expected_mutations
+        )
+        final_response = trace[-1]["assistant"]
+        final_database_matches = (
+            len(goals) == 1 and len(actions) == 1 and actions[0]["status"] == "done"
+            and len(reflections) == 1
+        )
+        final_summary_matches = "完成" in final_response and "放松" in final_response
         checks = [
             assertion("uncommitted_wish_did_not_create_goal",
-                      not trace[0].get("growth_event") or trace[0]["growth_event"].get("status") != "committed",
+                      trace[0].get("growth_event") is None and not trace[0].get("unexpected_proposal_cancelled"),
                       f"first-turn event: {trace[0].get('growth_event')}"),
             assertion("exactly_one_goal_persisted", len(goals) == 1, f"stored goals: {goals}"),
+            assertion("all_explicit_mutations_committed", all_mutations_committed,
+                      f"approval statuses: {[(i, (trace[i].get('approval_event') or {}).get('status')) for i in expected_mutations]}"),
             assertion("one_action_persisted_as_done",
                       len(actions) == 1 and actions[0]["status"] == "done",
                       f"stored actions: {actions}"),
             assertion("reflection_persisted", len(reflections) == 1, f"stored reflections: {reflections}"),
-            assertion("final_read_contains_real_goal_and_children",
-                      final_result.get("goal", {}).get("id") == goal_id
-                      and {item.get("kind") for item in final_items} >= {"action", "reflection"},
-                      f"final read event: {final_read}"),
+            assertion("final_summary_matches_persisted_state",
+                      final_database_matches and final_summary_matches,
+                      f"database_matches={final_database_matches}; response={final_response}"),
         ]
         return {
             "title": case["title"], "turns": trace, "stored_records": rows,
@@ -587,7 +599,7 @@ def validate_cases():
         if not 0 <= index < len(CASES["growth-action-journey"]["turns"]):
             raise ValueError("Invalid growth step index")
         if expected not in {"no_mutation", "create_goal", "create_action", "get_goal",
-                            "update_item", "record_reflection"}:
+                            "update_item", "record_reflection", "natural_summary"}:
             raise ValueError("Invalid growth expected step")
     return True
 

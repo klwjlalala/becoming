@@ -12,7 +12,7 @@ from .models import ModelError
 PREFIX = "GROWTH_TOOL\n"
 POLICY = """【个人成长与行动辅助（可选工具）】
 自然交流优先。只在用户需要实际查询或明确希望记录/调整时使用工具；愿望、倾诉、讨论和建议不等于记录请求。
-普通回复直接输出自然语言。若需工具，可以先有一句简短说明，但 GROWTH_TOOL 必须单独占一行，下一行是仅含 tool 和 args 两键的 JSON 对象，不加代码围栏。
+普通回复直接输出自然语言。若需工具，可以先有一句简短说明，但 GROWTH_TOOL 必须单独占一行，下一行是仅含 tool 和 args 两键的 JSON 对象，不加代码围栏。不要自行生成“尚未保存。请核对以下变更”预览文本，也不要把工具 JSON 当普通回答；预览由工具系统根据真实数据库状态生成。
 可用工具：
 list_goals {"offset":0}（offset 可省略）
 get_goal {"goal_id":1,"offset":0}（offset 可省略；返回行动及复盘）
@@ -43,16 +43,21 @@ def _unique_pairs(pairs):
 
 def _tool_payload(response: str) -> str | None:
     marker = "GROWTH_TOOL"
-    if response.count(marker) != 1:
-        return None
-    index = response.find(marker)
-    if index and not response[index - 1].isspace():
-        return None
-    suffix = response[index + len(marker):]
-    if not suffix or not suffix[0].isspace():
-        return None
-    payload = suffix.strip()
-    return payload or None
+    if response.count(marker) == 1:
+        index = response.find(marker)
+        if not index or response[index - 1].isspace():
+            suffix = response[index + len(marker):]
+            if suffix and suffix[0].isspace():
+                payload = suffix.strip()
+                if payload:
+                    return payload
+    # Compatibility: accept the exact preview label followed by JSON.
+    # The payload is revalidated and the authoritative preview is rebuilt from SQLite.
+    preview_label = "尚未保存。请核对以下变更："
+    if response.startswith(preview_label):
+        payload = response[len(preview_label):].strip()
+        return payload or None
+    return None
 
 
 class GrowthModel:
@@ -77,7 +82,13 @@ class GrowthModel:
             if len(raw) > 12000:
                 raise ValueError("Tool request too large")
             request = json.loads(raw, object_pairs_hook=_unique_pairs)
-            if not isinstance(request, dict) or set(request) != {"tool", "args"}:
+            if not isinstance(request, dict):
+                raise ValueError("Invalid tool envelope")
+            if set(request) == {"tool", "args", "parent"}:
+                if not isinstance(request["parent"], dict):
+                    raise ValueError("Invalid model preview parent")
+                request = {"tool": request["tool"], "args": request["args"]}
+            if set(request) != {"tool", "args"}:
                 raise ValueError("Invalid tool envelope")
             tool, args = request["tool"], request["args"]
             if isinstance(tool, str) and tool in READ_TOOLS:

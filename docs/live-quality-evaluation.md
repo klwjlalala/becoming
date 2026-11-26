@@ -73,3 +73,8 @@ GitHub Actions 成功仅表示真实评测脚本完整运行。只有检查逐�
     python -m evaluation.live_quality --live --case memory-lifecycle --case growth-action-journey --max-calls 45 --output artifacts/recheck.json
 
 针对性复测用于修复真实模型暴露的问题，避免每次都重跑全部场景和消耗完整预算。报告会记录记忆提取、检索规划、证据排序及回复等模型调用的响应摘要，以便定位 JSON 协议或提取失败；只使用虚构测试数据。
+
+
+### 成长工具预览协议兼容
+
+真实模型曾输出预览标签加 JSON、但未输出 GROWTH_TOOL 标记。当前兼容解析仅接受精确预览标签开头的 JSON；其中模型提供的 parent 等上下文会被丢弃，工具层重新按真实数据库状态生成预览，ID、状态和版本仍由 GrowthStore 校验，且必须经过确认。该兼容分支不直接写库。
