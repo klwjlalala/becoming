@@ -76,8 +76,15 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
     app.state.runtime = runtime or AppRuntime.from_env()
     app.state.owns_runtime = runtime is None
 
+    @app.on_event("startup")
+    def start_background_worker():
+        app.state.runtime.start_background_worker()
+
     @app.on_event("shutdown")
     def shutdown_runtime():
+        if app.state.runtime.background_worker is not None:
+            app.state.runtime.background_worker.stop()
+            app.state.runtime.background_worker = None
         if app.state.owns_runtime:
             app.state.runtime.close()
 
@@ -192,9 +199,34 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
             "personal_understanding": rt.enable_personal_understanding,
             "data_export": True,
             "data_clear": True,
+            "background_tasks": rt.background_supported,
             "streaming": False,
             "multi_user": False,
         }
+
+    @app.get("/api/v1/background/status")
+    def background_status(request: Request):
+        rt = runtime_for(request)
+        with rt.lock:
+            return rt.background_status()
+
+    @app.get("/api/v1/background/jobs")
+    def list_background_jobs(
+        request: Request,
+        limit: int = Query(default=50, ge=1, le=200),
+        status: str | None = Query(default=None),
+        source_turn_id: int | None = Query(default=None, ge=1),
+    ):
+        rt = runtime_for(request)
+        with rt.lock:
+            try:
+                items = rt.store.list_background_jobs(
+                    limit=limit, status=status, source_turn_id=source_turn_id
+                )
+            except ValueError:
+                raise APIError(422, "invalid_background_query", "后台任务查询条件无效。") from None
+            return {"items": items, "limit": limit, "status": status,
+                    "source_turn_id": source_turn_id}
 
     @app.get("/api/v1/model/config")
     def get_model_config(request: Request):
@@ -313,12 +345,16 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
             require_conversation(rt, conversation_id)
             agent = get_agent(rt, conversation_id)
             try:
-                answer = agent.reply(payload.content)
+                answer = agent.reply(
+                    payload.content, defer_post_turn=rt.background_supported
+                )
             except ModelError as exc:
                 raise APIError(502, "model_request_failed", str(exc)) from None
             except ValueError as exc:
                 raise APIError(422, "invalid_message", str(exc)) from None
 
+            if rt.background_supported:
+                rt.wake_background_worker()
             pending = agent.adapter.pending
             confirmation = None
             if pending is not None:
