@@ -57,6 +57,7 @@ class MemoryEvent:
     written_ids: tuple[int, ...] = ()
     errors: tuple[str, ...] = ()
     search: dict | None = None
+    queued_job_ids: tuple[int, ...] = ()
 
 
 # Conservative source-boundary guard, not a semantic entailment classifier.
