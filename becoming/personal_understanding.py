@@ -870,12 +870,12 @@ class PersonalUnderstanding:
 
     @staticmethod
     def _confirmation_kind(text: str) -> str | None:
-        compact=re.sub(r"[\s，。！？!?、,.；;：:]+","",text.casefold())
-        negative=("不是","不对","并非","你理解错了","我不认可","我不同意","no","incorrect")
-        positive=("是的","对的","没错","确实","就是这样","可以这么理解","我认可","我同意","yes","correct")
-        if any(compact.startswith(token) for token in negative):
+        answer=text.strip().casefold()
+        negative=re.compile(r"^(?:不是|不对|并非|你理解错了|我不认可|我不同意|no|incorrect)(?:$|[，,。！？!?；;：:\\s])",re.I)
+        positive=re.compile(r"^(?:是的|对(?:的)?|没错|确实|就是这样|可以这么理解|我认可|我同意|yes|correct)(?:$|[，,。！？!?；;：:\\s])",re.I)
+        if negative.search(answer):
             return "rejected"
-        if any(compact.startswith(token) for token in positive):
+        if positive.search(answer):
             return "confirmed"
         return None
 
