@@ -82,13 +82,12 @@ class GrowthModel:
                 except ModelError:
                     final = "已读取记录，但模型未能完成解读。"
                     self.event["followup_failed"] = True
-                return final.strip() + "\n\n实际查询结果：\n" + _dump(result)
+                return final.strip() if not self.event.get("followup_failed") else final.strip()
             preview = self.store.prepare(tool, args)
             token = secrets.token_hex(4)
             self.pending = (token, preview)
             self.event = {"tool": tool, "args": preview["args"], "status": "proposed"}
-            return ("尚未保存。请核对以下变更：\n" + _dump(preview)
-                    + "\n确认请输入 /confirm " + token + "；取消请输入 /cancel。")
+            return "尚未保存。请核对以下变更：\n" + _dump(preview)
         except (ValueError, sqlite3.Error, RecursionError):
             self.pending = None
             self.event = {"tool": tool if isinstance(tool, str) else None, "status": "rejected"}
@@ -96,12 +95,35 @@ class GrowthModel:
 
 
 class GrowthAgent:
-    """Compose the existing Agent; confirmation is a local command, never model-controlled."""
-    def __init__(self, model, transcript, growth: GrowthStore, **agent_options):
+    """Compose conversation, optional long memory and confirmed growth tools."""
+    def __init__(self, model, transcript, growth: GrowthStore, *, long_memory=None, **agent_options):
+        self.transcript = transcript
         self.adapter = GrowthModel(model, growth)
-        self.agent = Agent(self.adapter, transcript, **agent_options)
+        self.agent = Agent(self.adapter, transcript, long_memory=long_memory, **agent_options)
         self.growth = growth
         self.last_event = None
+
+    @property
+    def last_memory_event(self):
+        return self.agent.last_memory_event
+
+    def _record_control_event(self, user, assistant):
+        try:
+            self.transcript.append_turn(user, assistant)
+            return True
+        except sqlite3.Error:
+            return False
+
+    def _cancel_pending(self, reason):
+        if self.adapter.pending is None:
+            return False
+        self.adapter.pending = None
+        logged = self._record_control_event(
+            "我取消了刚才尚未确认的成长记录变更。",
+            "待确认变更已取消：" + reason + "。")
+        self.last_event = {"status": "cancelled", "reason": reason,
+                           "transcript_log_failed": not logged}
+        return True
 
     def reply(self, text):
         text = text.strip()
@@ -109,9 +131,11 @@ class GrowthAgent:
         if not text:
             raise ValueError("Input cannot be empty")
         if text == "/cancel":
-            self.adapter.pending = None
-            self.last_event = {"status": "cancelled"}
-            return "已取消待确认变更。"
+            if not self._cancel_pending("用户取消"):
+                self.last_event = {"status": "no_pending"}
+                return "当前没有待确认变更。"
+            return ("已取消待确认变更。" if not self.last_event["transcript_log_failed"]
+                    else "已取消待确认变更，但对话日志未能同步写入。")
         if text == "/confirm" or text.startswith("/confirm "):
             pending = self.adapter.pending
             if pending is None or text != "/confirm " + pending[0]:
@@ -126,13 +150,23 @@ class GrowthAgent:
                 return "未完成变更（记录可能已变化或存储失败），请重新发起请求。"
             self.last_event = {"tool": preview["tool"], "args": preview["args"],
                                "status": "committed", "result": result}
+            logged = self._record_control_event(
+                "我确认了刚才展示的成长记录变更。",
+                "已保存变更：" + _dump(result))
+            if not logged:
+                self.last_event["transcript_log_failed"] = True
+                return "成长记录已保存，但对话日志未能同步写入。"
             return "已保存变更：\n" + _dump(result)
-        # Any new conversation invalidates the preceding proposal, even on failure.
-        self.adapter.pending = None
+        # Any new message invalidates a pending proposal before it reaches the model.
+        self._cancel_pending("用户开始了新的对话")
         try:
             answer = self.agent.reply(text)
         except BaseException:
             self.adapter.pending = None
             raise
         self.last_event = self.adapter.event
+        # The one-time nonce is appended only to the CLI response, not transcript/model history.
+        if self.adapter.pending is not None:
+            token = self.adapter.pending[0]
+            answer += "\n确认请输入 /confirm " + token + "；取消请输入 /cancel。"
         return answer

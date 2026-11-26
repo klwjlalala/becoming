@@ -68,6 +68,14 @@ class GrowthStore:
             """)
             self.connection.execute("CREATE INDEX IF NOT EXISTS growth_parent ON growth_items(goal_id, id)")
 
+    def clear(self):
+        """Delete all growth goals; child actions and reflections cascade."""
+        counts = {row["kind"]: row["count"] for row in self.connection.execute(
+            "SELECT kind, COUNT(*) AS count FROM growth_items GROUP BY kind")}
+        with self.connection:
+            self.connection.execute("DELETE FROM growth_items WHERE kind='goal'")
+        return {kind: counts.get(kind, 0) for kind in ("goal", "action", "reflection")}
+
     def close(self):
         self.connection.close()
 

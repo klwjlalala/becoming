@@ -12,10 +12,16 @@
 git clone https://github.com/klwjlalala/becoming.git
 cd becoming
 python -m becoming --demo
+# 单一入口：真实模型 + 成长工具 + 综合长期记忆
+python -m becoming --growth --long-memory --comprehensive-memory
 python -m unittest discover -s tests -v
 ```
 
 Demo 为固定的模拟模型，不具有真实 AI 理解能力，也不会发送网络请求。Demo 默认保存在 data/demo.sqlite3，真实模式默认保存在 data/conversations.sqlite3；可用 --db :memory: 不落盘，或 --db <path> 选择文件。/exit 退出，/clear 清除当前数据库中的对话记录（逻辑删除，不保证物理擦除）。
+
+## 统一服务入口（成长辅助）
+
+`python -m becoming --growth --long-memory --comprehensive-memory` 在同一对话入口组合长期记忆、自我理解、迷茫引导与成长工具。成长数据默认存于 `data/growth.sqlite3`，对话及长期记忆存于 `data/conversations.sqlite3`，可分别用 `--db` 和 `--growth-db` 指定，两个文件不能相同。`/confirm <token>` 确认变更，`/cancel` 取消，`/clear-growth` 后按提示二次确认清除成长记录。`/clear` 只清除对话及关联长期记忆，不删除独立成长记录。删除成长记录不会清除对话或长期记忆中的副本；删除对话也不会删除成长记录。SQLite 逻辑删除不保证物理擦除。
 
 ## 接入真实模型
 

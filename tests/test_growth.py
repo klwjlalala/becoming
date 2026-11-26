@@ -89,8 +89,9 @@ class GrowthTests(unittest.TestCase):
         agent = GrowthAgent(model, self.history, self.store)
         for text in ("列出目标", "看详情"):
             answer = agent.reply(text)
-            self.assertIn("真实标记", answer)
+            self.assertEqual(answer, "你的目标如下" if text == "列出目标" else "详情")
             self.assertEqual(agent.last_event["status"], "read")
+            self.assertIn("真实标记", json.dumps(agent.last_event["result"], ensure_ascii=False))
             self.assertIn("真实标记", model.calls[-1][-1]["content"])
         self.assertEqual(len(model.calls), 4)
 
@@ -176,6 +177,41 @@ class GrowthTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             agent.reply("记录")
         self.assertIsNone(agent.adapter.pending)
+        self.assertEqual(self.store.read("list_goals", {})["items"], [])
+
+    def test_confirmation_and_cancellation_are_recorded_without_nonce_leak(self):
+        model = Scripted(call("create_goal", text="长期阅读"))
+        agent = GrowthAgent(model, self.history, self.store)
+        preview = agent.reply("帮我记录长期阅读目标")
+        token = agent.adapter.pending[0]
+        self.assertIn("/confirm " + token, preview)
+        transcript = self.history.recent()
+        self.assertNotIn(token, json.dumps(transcript, ensure_ascii=False))
+        agent.reply("/confirm " + token)
+        transcript = self.history.recent()
+        self.assertIn("我确认了刚才展示的成长记录变更。",
+                      [m["content"] for m in transcript if m["role"] == "user"])
+        self.assertNotIn(token, json.dumps(transcript, ensure_ascii=False))
+        self.assertEqual(agent.last_event["status"], "committed")
+
+    def test_cancel_and_new_message_log_cancellation(self):
+        model = Scripted(call("create_goal", text="A"), "普通回复", call("create_goal", text="B"))
+        agent = GrowthAgent(model, self.history, self.store)
+        agent.reply("记录A")
+        agent.reply("/cancel")
+        self.assertEqual(agent.last_event["status"], "cancelled")
+        self.assertIn("我取消了刚才尚未确认的成长记录变更。",
+                      [m["content"] for m in self.history.recent() if m["role"] == "user"])
+        agent.reply("记录B")
+        agent.reply("换个话题")
+        self.assertEqual(agent.last_event, None)
+        self.assertEqual(len(self.store.read("list_goals", {})["items"]), 0)
+
+    def test_growth_store_clear_cascades_all_children(self):
+        goal = self.create("create_goal", text="g")
+        self.create("create_action", goal_id=goal["id"], text="a")
+        self.create("record_reflection", goal_id=goal["id"], text="r")
+        self.assertEqual(self.store.clear(), {"goal": 1, "action": 1, "reflection": 1})
         self.assertEqual(self.store.read("list_goals", {})["items"], [])
 
     def test_model_failure_and_recovery(self):
