@@ -93,6 +93,14 @@ class GrowthTests(unittest.TestCase):
         self.assertEqual(agent.last_event["result"]["items"], [])
         self.assertEqual(answer, "目前还没有成长目标。")
 
+    def test_tool_marker_after_chinese_punctuation_is_executed(self):
+        model = Scripted("我会查询一下。GROWTH_TOOL\n" +
+                         json.dumps({"tool": "list_goals", "args": {}}, ensure_ascii=False),
+                         "目前还没有成长目标。")
+        agent = GrowthAgent(model, self.history, self.store)
+        self.assertEqual(agent.reply("查看目标"), "目前还没有成长目标。")
+        self.assertEqual(agent.last_event["status"], "read")
+
     def test_tool_marker_with_inline_json_is_executed(self):
         raw = json.dumps({"tool": "list_goals", "args": {}}, ensure_ascii=False)
         model = Scripted("我来查询。 GROWTH_TOOL " + raw, "目前还没有成长目标。")

@@ -45,7 +45,8 @@ def _tool_payload(response: str) -> str | None:
     marker = "GROWTH_TOOL"
     if response.count(marker) == 1:
         index = response.find(marker)
-        if not index or response[index - 1].isspace():
+        previous = response[index - 1] if index else ""
+        if not index or previous.isspace() or previous in "。！？；：，、,.!?;:":
             suffix = response[index + len(marker):]
             if suffix and suffix[0].isspace():
                 payload = suffix.strip()
