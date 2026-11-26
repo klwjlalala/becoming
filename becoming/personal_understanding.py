@@ -806,16 +806,19 @@ class PersonalUnderstanding:
 
     def _calculate_support(self, version_id: int, validation: str) -> str:
         rows=self.db.execute("""
-            SELECT e.source_turn_id,ce.relation FROM understanding_claim_evidence ce
-            JOIN understanding_evidence e ON e.id=ce.evidence_id WHERE ce.claim_version_id=?
+            SELECT e.source_turn_id,ce.relation,e.recorded_at
+            FROM understanding_claim_evidence ce
+            JOIN understanding_evidence e ON e.id=ce.evidence_id
+            WHERE ce.claim_version_id=?
         """,(version_id,)).fetchall()
         support={r[0] for r in rows if r[1] in {"support","qualifies"}}
         counter={r[0] for r in rows if r[1]=="counter"}
+        dates={r[2][:10] for r in rows if r[1] in {"support","qualifies"} and r[2]}
         if counter:
             return "low"
         if validation=="confirmed":
             return "high"
-        if len(support)>=3:
+        if len(support)>=3 and len(dates)>=2:
             return "high"
         if len(support)>=2:
             return "medium"
@@ -864,16 +867,28 @@ class PersonalUnderstanding:
         return None
 
     def resolve_pending_confirmation(self, text: str, current_turn_id: int) -> tuple[str,...]:
-        pending=self.db.execute("""
+        pending_rows=self.db.execute("""
             SELECT p.id,p.claim_id,p.claim_version_id,p.source_turn_id,
                    c.current_version,v.content,v.dimension,v.basis,v.scope_json,
                    v.temporal_scope,v.user_validation
             FROM understanding_pending_confirmations p
             JOIN understanding_claims c ON c.id=p.claim_id
             JOIN understanding_claim_versions v ON v.id=p.claim_version_id
-            WHERE p.status='pending' ORDER BY p.id DESC LIMIT 1
-        """).fetchone()
-        if pending is None or pending[3]>=current_turn_id:
+            WHERE p.status='pending' ORDER BY p.id DESC
+        """).fetchall()
+        if not pending_rows:
+            return ()
+        # A confirmation is valid only in the immediately following transcript turn.
+        eligible=[row for row in pending_rows if row[3]==current_turn_id-1]
+        pending=eligible[0] if eligible else None
+        with self.db:
+            for row in pending_rows:
+                if pending is None or row[0]!=pending[0]:
+                    self.db.execute("""
+                        UPDATE understanding_pending_confirmations
+                        SET status='expired',resolved_at=? WHERE id=?
+                    """,(_now(),row[0]))
+        if pending is None:
             return ()
         kind=self._confirmation_kind(text)
         with self.db:
