@@ -195,7 +195,7 @@ class GrowthTests(unittest.TestCase):
         self.assertEqual(agent.last_event["status"], "committed")
 
     def test_cancel_and_new_message_log_cancellation(self):
-        model = Scripted(call("create_goal", text="A"), "普通回复", call("create_goal", text="B"))
+        model = Scripted(call("create_goal", text="A"), call("create_goal", text="B"), "普通回复")
         agent = GrowthAgent(model, self.history, self.store)
         agent.reply("记录A")
         agent.reply("/cancel")

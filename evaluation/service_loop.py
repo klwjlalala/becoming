@@ -22,6 +22,7 @@ CASES = {
             "今天读完后我感觉很放松，请帮我记录这次复盘。",
             "结合我之前说的阅读偏好和这个目标的行动、复盘，帮我总结一下。"
         ],
+        "approval_turns": [2, 3, 4, 5],
         "criteria": [
             "第一次交流后记住用户明确要求长期保留的偏好",
             "后续交流能找回准确历史证据，不编造",
@@ -51,12 +52,13 @@ def run_case(model, case, approve_proposals=False):
         memory = ComprehensiveMemory(transcript, model)
         agent = GrowthAgent(model, transcript, growth, long_memory=memory)
         turns = []
-        for user in case["turns"]:
+        approval_turns = set(case.get("approval_turns", ()))
+        for index, user in enumerate(case["turns"]):
             answer = agent.reply(user)
             row = {"user": user, "assistant": answer,
                    "memory_event": agent.last_memory_event.__dict__,
                    "growth_event": agent.last_event}
-            if agent.adapter.pending is not None and approve_proposals:
+            if agent.adapter.pending is not None and approve_proposals and index in approval_turns:
                 token = agent.adapter.pending[0]
                 row["synthetic_approval"] = agent.reply("/confirm " + token)
                 row["approval_event"] = agent.last_event
