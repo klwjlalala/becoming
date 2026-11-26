@@ -63,7 +63,7 @@ flowchart LR
 - `becoming/background.py`：独立连接的单进程后台 worker，负责长期记忆提取和个人理解更新的持久化调度、重试与恢复；支持暂停屏障，在删除会话或清空数据前排空正在执行的任务。
 - `becoming/memory.py`：新增 conversations、background_jobs 表及 turns.conversation_id 迁移；旧 CLI turns 归入 default 会话，近期上下文按会话隔离；消息轮次和后台任务在同一事务入队。
 - `becoming/long_memory.py`：每个来源轮次使用 extraction receipt 保证记忆提取重试幂等。
-- `becoming/personal_understanding.py`：保留原有专用批处理队列；命题写入与内部 job done 状态原子提交，并支持跨会话隔离的延迟确认补偿。
+- `becoming/personal_understanding.py`：保留原有专用批处理队列；命题写入与内部 job done 状态原子提交，并支持跨会话隔离的延迟确认补偿；API 与 worker 并发解析确认时通过 SQLite 写事务串行化，避免重复修订。
 - `docs/api-v1.md`：路由契约、后台任务状态、启动方式、安全边界和 GitHub HTTP 联调说明。
 
 当前 API 已覆盖健康检查、模型配置/连接测试、会话 CRUD、消息发送、成长预览/确认、长期记忆查看/遗忘、个人理解查看、后台任务状态、数据导出和全量清除。HTTP 消息请求只负责主回复和原子入队；后台 worker 使用独立 SQLite 连接执行记忆提取与个人理解更新，不占用 API runtime 锁。任务最多尝试 3 次，进程重启时会依据记忆 receipt 和个人理解内部任务状态恢复已完成任务，并将耗尽次数的中断任务标记为失败；来源对话删除或全量清除前会暂停 worker 并等待活动任务结束，来源任务再通过外键级联清理。
