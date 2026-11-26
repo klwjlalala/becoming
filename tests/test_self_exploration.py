@@ -3,7 +3,8 @@ import unittest
 from becoming.agent import Agent
 from becoming.memory import SQLiteConversationStore
 from becoming.models import ModelError
-from becoming.prompts import BASE_SYSTEM_PROMPT, SYSTEM_PROMPT
+from becoming.prompts import BASE_SYSTEM_PROMPT, EXPLORATION_SYSTEM_PROMPT, SYSTEM_PROMPT
+from becoming.guidance import GUIDANCE_PROMPT
 from becoming.self_exploration import SELF_EXPLORATION_PROMPT
 from evaluation.self_exploration import BaselineModel, CASES, run_case
 
@@ -25,7 +26,8 @@ class ExplorationTests(unittest.TestCase):
         self.agent = Agent(self.model, self.store)
 
     def test_policy_is_additive_and_applied_to_agent(self):
-        self.assertEqual(SYSTEM_PROMPT, BASE_SYSTEM_PROMPT + "\n" + SELF_EXPLORATION_PROMPT)
+        self.assertEqual(EXPLORATION_SYSTEM_PROMPT, BASE_SYSTEM_PROMPT + "\n" + SELF_EXPLORATION_PROMPT)
+        self.assertEqual(SYSTEM_PROMPT, EXPLORATION_SYSTEM_PROMPT + "\n" + GUIDANCE_PROMPT)
         self.agent.reply("我想认识自己")
         self.assertTrue(self.model.calls[0][0]["content"].startswith(SYSTEM_PROMPT))
         self.assertEqual(len(self.model.calls), 1)
@@ -50,7 +52,7 @@ class ExplorationTests(unittest.TestCase):
         messages = [{"role": "system", "content": SYSTEM_PROMPT + "\n历史证据"},
                     {"role": "user", "content": "你好"}]
         BaselineModel(self.model).complete(messages)
-        self.assertEqual(self.model.calls[0][0]["content"], BASE_SYSTEM_PROMPT + "\n历史证据")
+        self.assertEqual(self.model.calls[0][0]["content"], BASE_SYSTEM_PROMPT + "\n" + GUIDANCE_PROMPT + "\n历史证据")
         self.assertTrue(messages[0]["content"].startswith(SYSTEM_PROMPT))
         self.assertEqual(self.model.calls[0][1], messages[1])
 

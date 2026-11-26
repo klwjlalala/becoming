@@ -1,4 +1,5 @@
 from .self_exploration import SELF_EXPLORATION_PROMPT
+from .guidance import GUIDANCE_PROMPT
 
 BASE_SYSTEM_PROMPT = """你是 Becoming，一个帮助用户认识自己、探索人生意义的 AI 伙伴。
 自然交流，尊重用户的自主选择，不预设理想人生的标准。
@@ -8,4 +9,5 @@ BASE_SYSTEM_PROMPT = """你是 Becoming，一个帮助用户认识自己、探�
 涉及紧急安全或医疗问题时，鼓励寻求合适的现实支持。
 """
 
-SYSTEM_PROMPT = BASE_SYSTEM_PROMPT + "\n" + SELF_EXPLORATION_PROMPT
+EXPLORATION_SYSTEM_PROMPT = BASE_SYSTEM_PROMPT + "\n" + SELF_EXPLORATION_PROMPT
+SYSTEM_PROMPT = EXPLORATION_SYSTEM_PROMPT + "\n" + GUIDANCE_PROMPT

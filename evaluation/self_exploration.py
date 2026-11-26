@@ -7,7 +7,7 @@ from pathlib import Path
 from becoming.agent import Agent
 from becoming.memory import SQLiteConversationStore
 from becoming.models import ModelError, OpenAICompatibleModel
-from becoming.prompts import BASE_SYSTEM_PROMPT, SYSTEM_PROMPT
+from becoming.prompts import BASE_SYSTEM_PROMPT, EXPLORATION_SYSTEM_PROMPT
 
 
 CASES = {
@@ -74,9 +74,9 @@ class BaselineModel:
     def complete(self, messages):
         copied = [dict(message) for message in messages]
         if (copied and copied[0]["role"] == "system"
-                and copied[0]["content"].startswith(SYSTEM_PROMPT)):
+                and copied[0]["content"].startswith(EXPLORATION_SYSTEM_PROMPT)):
             content = copied[0]["content"]
-            copied[0]["content"] = BASE_SYSTEM_PROMPT + content[len(SYSTEM_PROMPT):]
+            copied[0]["content"] = BASE_SYSTEM_PROMPT + content[len(EXPLORATION_SYSTEM_PROMPT):]
         return self.delegate.complete(copied)
 
 
