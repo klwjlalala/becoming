@@ -276,35 +276,40 @@ def parse_proposal(raw: str, turns: list[dict], claims: list[Claim]) -> dict:
     confirmation = data.get("confirmation")
     normalized_confirmation = None
     if confirmation is not None:
-        if not isinstance(confirmation, dict) or set(confirmation) != {
-            "claim_id", "claim_ref", "expected_version", "turn_index", "question"
-        }:
-            raise ValueError("invalid confirmation proposal")
-        turn_index, question = confirmation["turn_index"], confirmation["question"]
-        if type(turn_index) is not int or turn_index not in turn_by_index:
-            raise ValueError("confirmation references an unknown turn")
-        assistant_text = turn_by_index[turn_index]["assistant_text"]
-        if (not isinstance(question, str) or len(question) > 240 or question not in assistant_text
-                or not any(mark in question for mark in ("?", "？"))):
-            raise ValueError("confirmation question was not actually asked")
-        claim_id, claim_ref = confirmation["claim_id"], confirmation["claim_ref"]
-        if (claim_id is None) == (claim_ref is None):
-            raise ValueError("confirmation must reference exactly one claim")
-        if claim_ref is not None:
-            if claim_ref not in {op["target"][1] for op in normalized_ops if op["operation"] == "CREATE"}:
-                raise ValueError("confirmation references unknown new claim")
-            expected = 1
-        else:
-            if claim_id not in claim_by_id:
-                raise ValueError("confirmation references unknown claim")
-            expected = claim_by_id[claim_id].version
-        if type(confirmation["expected_version"]) is not int or confirmation["expected_version"] != expected:
-            raise ValueError("confirmation references stale version")
-        normalized_confirmation = {
-            "claim_id": claim_id, "claim_ref": claim_ref,
-            "expected_version": expected, "turn_index": turn_index,
-            "question": question,
-        }
+        try:
+            if not isinstance(confirmation, dict) or set(confirmation) != {
+                "claim_id", "claim_ref", "expected_version", "turn_index", "question"
+            }:
+                raise ValueError("invalid confirmation proposal")
+            turn_index, question = confirmation["turn_index"], confirmation["question"]
+            if type(turn_index) is not int or turn_index not in turn_by_index:
+                raise ValueError("confirmation references an unknown turn")
+            assistant_text = turn_by_index[turn_index]["assistant_text"]
+            if (not isinstance(question, str) or len(question) > 240 or question not in assistant_text
+                    or not any(mark in question for mark in ("?", "？"))):
+                raise ValueError("confirmation question was not actually asked")
+            claim_id, claim_ref = confirmation["claim_id"], confirmation["claim_ref"]
+            if (claim_id is None) == (claim_ref is None):
+                raise ValueError("confirmation must reference exactly one claim")
+            if claim_ref is not None:
+                if claim_ref not in {op["target"][1] for op in normalized_ops if op["operation"] == "CREATE"}:
+                    raise ValueError("confirmation references unknown new claim")
+                expected = 1
+            else:
+                if claim_id not in claim_by_id:
+                    raise ValueError("confirmation references unknown claim")
+                expected = claim_by_id[claim_id].version
+            if type(confirmation["expected_version"]) is not int or confirmation["expected_version"] != expected:
+                raise ValueError("confirmation references stale version")
+            normalized_confirmation = {
+                "claim_id": claim_id, "claim_ref": claim_ref,
+                "expected_version": expected, "turn_index": turn_index,
+                "question": question,
+            }
+        except (ValueError, TypeError):
+            # Confirmation is optional: a malformed/fabricated question must not
+            # discard otherwise valid evidence-backed claim updates.
+            normalized_confirmation = None
     return {"evidence": evidence_by_ref, "operations": normalized_ops,
             "confirmation": normalized_confirmation}
 
