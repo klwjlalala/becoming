@@ -145,6 +145,92 @@ class PersonalUnderstandingTests(unittest.TestCase):
         self.assertEqual(history[0]["content"], "用户重视自主安排时间。")
         self.assertIn("共同兴趣", history[1]["content"])
 
+    def test_refine_can_retain_selected_prior_evidence(self):
+        engine, model = self.make_engine(create_proposal())
+        claim = self.create_claim(engine, model)
+        original_evidence_id = engine.get_claim_history(claim.id)[0]["evidence"][0]["id"]
+        new_quote = "和能聊到一块的人交流会让我很有精神。"
+        model.outputs.append(json.dumps({
+            "evidence": [{
+                "ref": "e1", "turn_index": 0, "quote": new_quote,
+                "kind": "self_interpretation", "event_time": None,
+            }],
+            "operations": [{
+                "operation": "REFINE", "claim_ref": None, "claim_id": claim.id,
+                "expected_version": 1,
+                "content": "用户重视自主安排时间，也喜欢与有共同兴趣的人深入交流。",
+                "dimension": "patterns", "basis": "self_interpretation",
+                "scope": {"context": "工作选择与社交"},
+                "temporal_scope": "ongoing",
+                "evidence": [{"ref": "e1", "relation": "qualifies"}],
+                "prior_evidence": [{
+                    "evidence_id": original_evidence_id, "relation": "qualifies"
+                }],
+                "reason": "保留仍然适用的旧证据，并加入新的情境限定。",
+            }],
+            "confirmation": None,
+        }, ensure_ascii=False))
+        turn_id = self.store.append_turn(new_quote, "明白。")
+        engine._enqueue(turn_id, "normal")
+        event = engine.process_pending()
+        self.assertFalse(event.errors)
+        history = engine.get_claim_history(claim.id)
+        current_evidence = history[-1]["evidence"]
+        self.assertEqual(
+            {item["quote"] for item in current_evidence},
+            {"我更在意能自己安排时间。", new_quote},
+        )
+        self.assertEqual({item["relation"] for item in current_evidence}, {"qualifies"})
+
+    def test_prior_evidence_reference_must_belong_to_target_claim(self):
+        engine, model = self.make_engine(create_proposal())
+        claim = self.create_claim(engine, model)
+        quote = "和能聊到一块的人交流会让我很有精神。"
+        model.outputs.append(json.dumps({
+            "evidence": [{
+                "ref": "e1", "turn_index": 0, "quote": quote,
+                "kind": "self_interpretation", "event_time": None,
+            }],
+            "operations": [{
+                "operation": "REFINE", "claim_ref": None, "claim_id": claim.id,
+                "expected_version": 1,
+                "content": "用户重视自主安排时间，也喜欢与有共同兴趣的人深入交流。",
+                "dimension": "patterns", "basis": "self_interpretation",
+                "scope": {}, "temporal_scope": "ongoing",
+                "evidence": [{"ref": "e1", "relation": "qualifies"}],
+                "prior_evidence": [{"evidence_id": 999999, "relation": "support"}],
+                "reason": "invalid evidence reference",
+            }],
+            "confirmation": None,
+        }, ensure_ascii=False))
+        turn_id = self.store.append_turn(quote, "明白。")
+        engine._enqueue(turn_id, "normal")
+        event = engine.process_pending()
+        self.assertEqual(event.errors, ("update_failed",))
+        self.assertEqual(engine.list_claims()[0].version, 1)
+        self.assertEqual(len(engine.get_claim_history(claim.id)), 1)
+
+    def test_listen_only_turn_skips_personal_understanding_retrieval(self):
+        engine, model = self.make_engine(create_proposal())
+        self.create_claim(engine, model)
+        result = engine.retrieve("我最近有点迷茫，先别给我方案，我只是想说说。")
+        self.assertEqual(result, [])
+        self.assertEqual(engine.last_search["suppression_reason"], "listen_only")
+
+    def test_third_party_vent_skips_personal_understanding_retrieval(self):
+        engine, model = self.make_engine(create_proposal())
+        self.create_claim(engine, model)
+        result = engine.retrieve("我朋友最近说他想辞职创业，我只是听他吐槽。")
+        self.assertEqual(result, [])
+        self.assertEqual(engine.last_search["suppression_reason"], "third_party_only")
+
+    def test_transient_mood_skips_personal_understanding_retrieval(self):
+        engine, model = self.make_engine(create_proposal())
+        self.create_claim(engine, model)
+        result = engine.retrieve("今天有点烦，什么都不想做，明天应该就好了。")
+        self.assertEqual(result, [])
+        self.assertEqual(engine.last_search["suppression_reason"], "transient_mood")
+
     def test_dispute_retains_both_support_and_counter_evidence(self):
         engine, model = self.make_engine(create_proposal())
         claim = self.create_claim(engine, model)
