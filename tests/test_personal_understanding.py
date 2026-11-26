@@ -500,6 +500,22 @@ class PersonalUnderstandingTests(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(status, "done")
 
+
+    def test_event_time_must_be_explicit_and_evidence_refs_unique(self):
+        invalid_time = json.loads(create_proposal())
+        invalid_time["evidence"][0]["event_time"] = "2020-01-01"
+        duplicate_ref = json.loads(create_proposal())
+        duplicate_ref["operations"][0]["evidence"].append(
+            {"ref": "e1", "relation": "qualifies"}
+        )
+        for proposal in (invalid_time, duplicate_ref):
+            engine, model = self.make_engine(json.dumps(proposal, ensure_ascii=False))
+            turn_id = self.store.append_turn("我更在意能自己安排时间。", "收到。")
+            engine._enqueue(turn_id, "normal")
+            event = engine.process_pending()
+            self.assertEqual(event.errors, ("update_failed",))
+            self.assertEqual(engine.list_claims(), [])
+
     def test_store_mismatch_and_invalid_limits(self):
         other = SQLiteConversationStore(":memory:")
         self.addCleanup(other.close)
