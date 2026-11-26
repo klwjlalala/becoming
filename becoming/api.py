@@ -316,11 +316,22 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
     def delete_conversation(conversation_id: str, request: Request):
         rt = runtime_for(request)
         with rt.lock:
+            worker = rt.background_worker
+            if worker is not None and not worker.pause(timeout=5.0):
+                worker.resume()
+                raise APIError(
+                    409, "background_busy",
+                    "后台整理仍在执行，请稍后重试删除操作。",
+                )
             try:
-                result = rt.store.delete_conversation(conversation_id)
-            except ValueError:
-                raise APIError(404, "conversation_not_found", "对话不存在。") from None
-            rt.agents.pop(conversation_id, None)
+                try:
+                    result = rt.store.delete_conversation(conversation_id)
+                except ValueError:
+                    raise APIError(404, "conversation_not_found", "对话不存在。") from None
+                rt.agents.pop(conversation_id, None)
+            finally:
+                if worker is not None:
+                    worker.resume()
         return {"success": True, **result}
 
     @app.get("/api/v1/conversations/{conversation_id}/messages")
@@ -564,28 +575,41 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
         with rt.lock:
             if payload.token not in rt.pending_data_clears:
                 raise APIError(409, "confirmation_expired", "清除确认请求不存在或已失效。")
-            rt.pending_data_clears.remove(payload.token)
-            with rt.store.connection:
-                turn_count = rt.store.connection.execute("SELECT COUNT(*) FROM turns").fetchone()[0]
-                rt.store.connection.execute("DELETE FROM turns")
-                rt.store.connection.execute(
-                    "DELETE FROM conversations WHERE id <> 'default'"
+            worker = rt.background_worker
+            if worker is not None and not worker.pause(timeout=10.0):
+                worker.resume()
+                raise APIError(
+                    409, "background_busy",
+                    "后台整理仍在执行，请稍后重试清除操作。",
                 )
-                rt.store.connection.execute(
-                    "UPDATE conversations SET title='默认对话', archived_at=NULL, updated_at=CURRENT_TIMESTAMP "
-                    "WHERE id='default'"
-                )
-                tables = {
-                    row[0] for row in rt.store.connection.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table'"
+            try:
+                rt.pending_data_clears.remove(payload.token)
+                with rt.store.connection:
+                    turn_count = rt.store.connection.execute(
+                        "SELECT COUNT(*) FROM turns"
+                    ).fetchone()[0]
+                    rt.store.connection.execute("DELETE FROM turns")
+                    rt.store.connection.execute(
+                        "DELETE FROM conversations WHERE id <> 'default'"
                     )
-                }
-                if "blocked_memory_keys" in tables:
-                    rt.store.connection.execute("DELETE FROM blocked_memory_keys")
-            growth_counts = rt.growth.clear()
-            rt.agents.clear()
-            rt.pending_growth_changes.clear()
-            rt.pending_data_clears.clear()
+                    rt.store.connection.execute(
+                        "UPDATE conversations SET title='默认对话', archived_at=NULL, "
+                        "updated_at=CURRENT_TIMESTAMP WHERE id='default'"
+                    )
+                    tables = {
+                        row[0] for row in rt.store.connection.execute(
+                            "SELECT name FROM sqlite_master WHERE type='table'"
+                        )
+                    }
+                    if "blocked_memory_keys" in tables:
+                        rt.store.connection.execute("DELETE FROM blocked_memory_keys")
+                growth_counts = rt.growth.clear()
+                rt.agents.clear()
+                rt.pending_growth_changes.clear()
+                rt.pending_data_clears.clear()
+            finally:
+                if worker is not None:
+                    worker.resume()
         return {
             "success": True,
             "deleted_turns": turn_count,
