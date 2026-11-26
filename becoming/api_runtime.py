@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from .background import BackgroundWorker
 from .growth_agent import GrowthAgent
 from .growth_store import GrowthStore
 from .long_memory import LongMemory
@@ -41,7 +42,12 @@ class AppRuntime:
                 raise ValueError("Conversation and growth databases must be separate")
 
         self.lock = threading.RLock()
-        self.store = SQLiteConversationStore(db_path)
+        self.db_path = (
+            str(Path(db_path).resolve()) if str(db_path) != ":memory:" else ":memory:"
+        )
+        self.background_supported = self.db_path != ":memory:"
+        self.background_worker: BackgroundWorker | None = None
+        self.store = SQLiteConversationStore(self.db_path)
         try:
             self.growth = GrowthStore(growth_db_path)
         except BaseException:
@@ -111,6 +117,8 @@ class AppRuntime:
             "model": model,
         }
         self.demo = False
+        if self.background_worker is not None:
+            self.background_worker.set_model(replacement)
         # Existing agents capture the previous model adapter. Drop them so
         # future requests consistently use the newly configured model.
         self.agents.clear()
@@ -159,7 +167,47 @@ class AppRuntime:
         scoped = self.store.for_conversation("default")
         return PersonalUnderstanding(scoped, self.model or DemoModel())
 
+    def start_background_worker(self) -> None:
+        if not self.background_supported:
+            return
+        if self.background_worker is None:
+            self.background_worker = BackgroundWorker(
+                self.db_path,
+                self.require_model_if_configured,
+                enable_long_memory=self.enable_long_memory,
+                enable_personal_understanding=self.enable_personal_understanding,
+            )
+        self.background_worker.start()
+
+    def require_model_if_configured(self) -> Model | None:
+        return self.model
+
+    def wake_background_worker(self) -> None:
+        if self.background_worker is not None:
+            self.background_worker.wake()
+
+    def background_status(self) -> dict:
+        if self.background_worker is None:
+            return {
+                "running": False,
+                "supported": self.background_supported,
+                "counts": {
+                    "pending": 0, "running": 0, "done": 0,
+                    "failed": 0, "cancelled": 0,
+                },
+                "by_kind": self.store.background_job_counts(),
+                "last_error": None,
+                "max_attempts": 3,
+            }
+        return {
+            "supported": self.background_supported,
+            **self.background_worker.status(),
+        }
+
     def close(self) -> None:
+        if self.background_worker is not None:
+            self.background_worker.stop()
+            self.background_worker = None
         with self.lock:
             self.agents.clear()
             self.growth.close()
