@@ -32,15 +32,21 @@ SENSITIVE = re.compile(
     r"抑郁症|双相障碍|精神分裂症|艾滋病|HIV阳性|性取向|同性恋|异性恋|"
     r"宗教信仰|政治立场|党员身份|民族身份)", re.I)
 URGENT_CUES = (
-    "你理解错了", "我理解错了", "更正一下", "纠正一下", "我想纠正",
-    "更新你对我的理解", "请更新我的理解", "我重新想过", "我改变主意",
-    "我现在决定", "我已经决定", "我不再", "不再把", "重新定义",
-    "remember this", "update your understanding", "correction:",
+    "你理解错了", "我理解错了", "更新你对我的理解", "请更新我的理解",
+    "我重新想过", "我改变主意", "我现在决定", "我已经决定",
+    "我不再", "不再把", "重新定义", "remember this",
+    "update your understanding", "correction:",
+)
+CORRECTION_CUES = ("更正一下", "纠正一下", "我想纠正")
+PERSONAL_CORRECTION_CUES = (
+    "我的理解", "我的目标", "我的想法", "我的偏好", "我的人生",
+    "我其实", "我现在", "我并不", "我更在意", "我真正",
 )
 PERSONAL_QUERY_CUES = (
-    "我自己", "我是什么样", "真正想要", "人生", "生活", "迷茫",
-    "价值观", "目标", "选择", "之前聊过", "你怎么看我", "了解我",
-    "我在意什么", "我重视什么", "为什么会", "我的取舍",
+    "我是什么样的人", "真正想要", "想要的生活", "怎样的生活",
+    "人生意义", "人生方向", "迷茫", "价值观", "目标", "选择",
+    "之前聊过", "你怎么看我", "了解我", "我在意什么",
+    "我重视什么", "为什么我会", "我的取舍",
 )
 REFLECTIVE_DIMENSIONS = {"values", "motivation", "needs", "patterns",
                          "cognition", "self_concept", "tensions"}
@@ -424,7 +430,12 @@ class PersonalUnderstanding:
     @staticmethod
     def is_urgent(text: str) -> bool:
         lowered = text.casefold()
-        return any(cue.casefold() in lowered for cue in URGENT_CUES)
+        if any(cue.casefold() in lowered for cue in URGENT_CUES):
+            return True
+        return (
+            any(cue in lowered for cue in CORRECTION_CUES)
+            and any(cue in lowered for cue in PERSONAL_CORRECTION_CUES)
+        )
 
     def list_claims(self, *, include_disputed: bool = True, limit: int = 100) -> list[Claim]:
         if not 0 <= limit <= 200:
