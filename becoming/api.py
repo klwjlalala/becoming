@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import time
 import uuid
 from dataclasses import asdict, is_dataclass
 from typing import Any
@@ -82,9 +83,27 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):
-        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+        supplied_id = request.headers.get("X-Request-ID", "")
+        request_id = (
+            supplied_id if re.fullmatch(r"[A-Za-z0-9._-]{1,64}", supplied_id)
+            else uuid.uuid4().hex
+        )
         request.state.request_id = request_id
-        response = await call_next(request)
+        try:
+            content_length = int(request.headers.get("content-length", "0"))
+        except ValueError:
+            content_length = 0
+        if content_length > 65536:
+            response = JSONResponse(
+                status_code=413,
+                content={"error": {
+                    "code": "request_too_large",
+                    "message": "请求内容超过服务限制。",
+                    "request_id": request_id,
+                }},
+            )
+        else:
+            response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         return response
 
@@ -371,16 +390,20 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
             except ValueError as exc:
                 raise APIError(422, "invalid_growth_change", str(exc)) from None
             token = secrets.token_urlsafe(24)
-            rt.pending_growth_changes[token] = preview
+            rt.pending_growth_changes[token] = {
+                "preview": preview,
+                "expires_at": time.time() + 600,
+            }
         return {"confirmation_required": True, "token": token, "preview": preview}
 
     @app.post("/api/v1/growth/changes/{token}/confirm")
     def confirm_growth_change(token: str, request: Request):
         rt = runtime_for(request)
         with rt.lock:
-            preview = rt.pending_growth_changes.pop(token, None)
-            if preview is None:
+            pending = rt.pending_growth_changes.pop(token, None)
+            if pending is None or pending["expires_at"] < time.time():
                 raise APIError(409, "confirmation_expired", "确认请求不存在、已使用或已失效。")
+            preview = pending["preview"]
             try:
                 result = rt.growth.apply(preview)
             except ValueError:
