@@ -1,0 +1,188 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from becoming.growth_agent import GrowthAgent, PREFIX, POLICY
+from becoming.growth_store import GrowthStore
+from becoming.memory import SQLiteConversationStore
+from becoming.models import ModelError
+
+
+def call(tool, **args):
+    return PREFIX + json.dumps({"tool": tool, "args": args}, ensure_ascii=False)
+
+
+class Scripted:
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def complete(self, messages):
+        self.calls.append([dict(m) for m in messages])
+        answer = self.responses.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+class GrowthTests(unittest.TestCase):
+    def setUp(self):
+        self.store = GrowthStore(":memory:")
+        self.history = SQLiteConversationStore(":memory:")
+        self.addCleanup(self.store.close)
+        self.addCleanup(self.history.close)
+
+    def create(self, tool, **args):
+        return self.store.apply(self.store.prepare(tool, args))["record"]
+
+    def confirm(self, agent):
+        return agent.reply("/confirm " + agent.adapter.pending[0])
+
+    def test_all_mutation_tools_through_agent_and_actual_storage(self):
+        model = Scripted(call("create_goal", text="创作"),
+                         call("create_action", goal_id=1, text="写一段故事"),
+                         call("record_reflection", goal_id=1, text="写作很放松"),
+                         call("update_item", id=2, status="done"),
+                         call("update_item", id=1, status="paused"),
+                         call("delete_item", id=3))
+        agent = GrowthAgent(model, self.history, self.store)
+        for i in range(6):
+            response = agent.reply("明确请求 " + str(i))
+            self.assertIn("尚未保存", response)
+            self.assertEqual(agent.last_event["status"], "proposed")
+            self.confirm(agent)
+            self.assertEqual(agent.last_event["status"], "committed")
+        result = self.store.read("get_goal", {"goal_id": 1})
+        self.assertEqual(result["goal"]["status"], "paused")
+        self.assertEqual([(x["kind"], x["status"]) for x in result["items"]], [("action", "done")])
+        self.assertEqual(len(model.calls), 6)
+
+    def test_preview_no_write_and_exact_one_shot_confirmation(self):
+        agent = GrowthAgent(Scripted(call("create_goal", text="阅读")), self.history, self.store)
+        agent.reply("帮我记录")
+        token = agent.adapter.pending[0]
+        self.assertEqual(self.store.read("list_goals", {})["items"], [])
+        self.assertIn("没有匹配", agent.reply("/confirm wrong"))
+        self.confirm(agent)
+        self.assertIn("没有匹配", agent.reply("/confirm " + token))
+        self.assertEqual(len(self.store.read("list_goals", {})["items"]), 1)
+
+    def test_cancel_new_message_restart_and_plain_language_never_commit(self):
+        model = Scripted(call("create_goal", text="A"), "好的", call("create_goal", text="B"),
+                         call("create_goal", text="C"))
+        agent = GrowthAgent(model, self.history, self.store)
+        agent.reply("记录A")
+        token = agent.adapter.pending[0]
+        agent.reply("确认")
+        self.assertIn("没有匹配", agent.reply("/confirm " + token))
+        agent.reply("记录B")
+        agent.reply("/cancel")
+        agent.reply("记录C")
+        other = GrowthAgent(Scripted(), self.history, self.store)
+        self.assertIn("没有匹配", other.reply("/confirm " + agent.adapter.pending[0]))
+        self.assertEqual(self.store.read("list_goals", {})["items"], [])
+
+    def test_read_tools_return_actual_results_and_followup(self):
+        self.create("create_goal", text="真实标记")
+        model = Scripted(call("list_goals"), "你的目标如下", call("get_goal", goal_id=1), "详情")
+        agent = GrowthAgent(model, self.history, self.store)
+        for text in ("列出目标", "看详情"):
+            answer = agent.reply(text)
+            self.assertIn("真实标记", answer)
+            self.assertEqual(agent.last_event["status"], "read")
+            self.assertIn("真实标记", model.calls[-1][-1]["content"])
+        self.assertEqual(len(model.calls), 4)
+
+    def test_read_followup_cannot_chain_mutation(self):
+        model = Scripted(call("list_goals"), call("create_goal", text="不允许"))
+        agent = GrowthAgent(model, self.history, self.store)
+        self.assertIn("未能完成解读", agent.reply("查询"))
+        self.assertTrue(agent.last_event["followup_failed"])
+        self.assertIsNone(agent.adapter.pending)
+        self.assertEqual(self.store.read("list_goals", {})["items"], [])
+
+    def test_normal_conversation_single_call_no_storage_mutation(self):
+        model = Scripted("听起来你只是想休息。")
+        agent = GrowthAgent(model, self.history, self.store)
+        self.assertEqual(agent.reply("今天好累"), "听起来你只是想休息。")
+        self.assertEqual(len(model.calls), 1)
+        self.assertIn(POLICY, model.calls[0][0]["content"])
+        self.assertIsNone(agent.last_event)
+        self.assertEqual(self.store.read("list_goals", {})["items"], [])
+
+    def test_invalid_envelopes_and_parameters_fail_closed(self):
+        invalid = [PREFIX + "{", PREFIX + '{"tool":"list_goals","tool":"delete_item","args":{}}',
+                   call("unknown"), call("create_goal", text=" "), call("create_goal", text="x", extra=True),
+                   call("create_action", goal_id=True, text="x"), call("delete_item", id=999),
+                   call("get_goal", goal_id=1.5), call("update_item", id=1)]
+        agent = GrowthAgent(Scripted(*invalid), self.history, self.store)
+        for _ in invalid:
+            agent.reply("测试")
+            self.assertEqual(agent.last_event["status"], "rejected")
+            self.assertIsNone(agent.adapter.pending)
+        self.assertEqual(self.store.read("list_goals", {})["items"], [])
+
+    def test_parent_kind_status_and_stale_write(self):
+        goal = self.create("create_goal", text="g")
+        action = self.create("create_action", goal_id=goal["id"], text="a")
+        with self.assertRaises(ValueError):
+            self.store.prepare("create_action", {"goal_id": action["id"], "text": "x"})
+        with self.assertRaises(ValueError):
+            self.store.prepare("update_item", {"id": goal["id"], "status": "done"})
+        agent = GrowthAgent(Scripted(call("update_item", id=goal["id"], status="paused")),
+                            self.history, self.store)
+        agent.reply("暂停")
+        self.store.apply(self.store.prepare("update_item", {"id": goal["id"], "text": "changed"}))
+        self.confirm(agent)
+        self.assertEqual(agent.last_event["status"], "failed")
+        self.assertEqual(self.store.read("get_goal", {"goal_id": goal["id"]})["goal"]["status"], "active")
+
+    def test_delete_cascade_and_stale_child_change(self):
+        goal = self.create("create_goal", text="g")
+        child = self.create("record_reflection", goal_id=goal["id"], text="first")
+        pending = self.store.prepare("delete_item", {"id": goal["id"]})
+        self.store.apply(self.store.prepare("update_item", {"id": child["id"], "text": "second"}))
+        with self.assertRaises(ValueError):
+            self.store.apply(pending)
+        result = self.store.apply(self.store.prepare("delete_item", {"id": goal["id"]}))
+        self.assertEqual(result["deleted_children"], 1)
+        self.assertEqual(self.store.read("list_goals", {})["items"], [])
+        with self.assertRaises(ValueError):
+            self.store.prepare("delete_item", {"id": child["id"]})
+
+    def test_persistence_pagination_and_isolation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "growth.sqlite"
+            s = GrowthStore(path)
+            for i in range(31):
+                s.apply(s.prepare("create_goal", {"text": str(i)}))
+            s.close()
+            s = GrowthStore(path)
+            self.addCleanup(s.close)
+            page = s.read("list_goals", {})
+            self.assertEqual(len(page["items"]), 30)
+            self.assertEqual(page["next_offset"], 30)
+            self.assertEqual(len(s.read("list_goals", {"offset": 30})["items"]), 1)
+            self.assertEqual(self.store.read("list_goals", {})["items"], [])
+
+    def test_transcript_failure_invalidates_proposal(self):
+        class BrokenTranscript:
+            def recent(self, limit):
+                return []
+            def append_turn(self, user, assistant):
+                raise RuntimeError("disk failure")
+        agent = GrowthAgent(Scripted(call("create_goal", text="g")), BrokenTranscript(), self.store)
+        with self.assertRaises(RuntimeError):
+            agent.reply("记录")
+        self.assertIsNone(agent.adapter.pending)
+        self.assertEqual(self.store.read("list_goals", {})["items"], [])
+
+    def test_model_failure_and_recovery(self):
+        agent = GrowthAgent(Scripted(call("create_goal", text="g"), ModelError("failed"), "恢复"),
+                            self.history, self.store)
+        agent.reply("记录")
+        with self.assertRaises(ModelError):
+            agent.reply("新消息")
+        self.assertIsNone(agent.adapter.pending)
+        self.assertEqual(agent.reply("再试"), "恢复")
