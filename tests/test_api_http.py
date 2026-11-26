@@ -68,6 +68,10 @@ class APIHTTPTests(unittest.TestCase):
         if getattr(cls, "temp", None) is not None:
             cls.temp.cleanup()
 
+    def setUp(self):
+        pending = self.request("POST", "/data/clear")
+        self.request("POST", "/data/clear/confirm", {"token": pending["token"]})
+
     def request(self, method, path, payload=None, expected=200):
         data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers = {"Content-Type": "application/json"} if data is not None else {}
