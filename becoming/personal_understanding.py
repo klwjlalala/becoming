@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import json
 import re
 import sqlite3
+from contextlib import nullcontext
 import uuid
 
 from .long_memory import complete_quote, terms
@@ -764,17 +765,20 @@ class PersonalUnderstanding:
             """,(f"turn:{turn_id}",turn_id,kind,now,now))
             return cursor.lastrowid
 
-    def observe_turn(self, turn_id: int, user_text: str, assistant_text: str) -> UnderstandingEvent:
+    def observe_turn(
+        self, turn_id: int, user_text: str, assistant_text: str, *,
+        process: bool = True,
+    ) -> UnderstandingEvent:
         row=self.db.execute("SELECT user_text,assistant_text FROM turns WHERE id=?",(turn_id,)).fetchone()
         if row is None or row!=(user_text,assistant_text):
             raise ValueError("understanding source turn mismatch")
         kind="immediate" if self.is_urgent(user_text) else "normal"
         job_id=self._enqueue(turn_id,kind)
         processed,written,errors=(),(),()
-        if kind=="immediate":
+        if process and kind=="immediate":
             event=self._process_jobs([job_id])
             processed,written,errors=event.processed_job_ids,event.written_claim_ids,event.errors
-        else:
+        elif process:
             count=self.db.execute("""
                 SELECT COUNT(*) FROM understanding_jobs WHERE status='pending' AND kind='normal'
             """).fetchone()[0]
@@ -845,8 +849,10 @@ class PersonalUnderstanding:
                 {"role":"user","content":json.dumps(payload,ensure_ascii=False)},
             ])
             proposal=parse_proposal(raw,turns,claims,existing_evidence_by_claim)
-            written=self._apply_proposal(proposal,turns,claims)
+            # Commit claim revisions and the job acknowledgement atomically.
+            # A process crash cannot apply a claim twice on recovery.
             with self.db:
+                written=self._apply_proposal(proposal,turns,claims)
                 marks=",".join("?" for _ in job_ids)
                 self.db.execute(f"""
                     UPDATE understanding_jobs SET status='done',last_error=NULL,updated_at=?
@@ -870,7 +876,8 @@ class PersonalUnderstanding:
         evidence_ids={}
         written=[]
         claim_aliases={}
-        with self.db:
+        transaction = nullcontext() if self.db.in_transaction else self.db
+        with transaction:
             def ensure_evidence(ref):
                 if ref in evidence_ids:
                     return evidence_ids[ref]
