@@ -170,6 +170,12 @@ class LongMemory:
 
         with self.db:
             self.db.execute("CREATE TABLE IF NOT EXISTS blocked_memory_keys (key TEXT PRIMARY KEY)")
+            self.db.execute("""
+                CREATE TABLE IF NOT EXISTS long_memory_extraction_receipts (
+                    turn_id INTEGER PRIMARY KEY REFERENCES turns(id) ON DELETE CASCADE,
+                    processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
     def blocked_keys(self) -> list[str]:
         return [r[0] for r in self.db.execute("SELECT key FROM blocked_memory_keys ORDER BY key")]
@@ -255,14 +261,25 @@ class LongMemory:
 
     def extract(self, turn_id: int, user: str) -> tuple[int, ...]:
         self.last_extract_rejected = 0
-        # No backfill or assistant output. Bound the extraction request and slot hints.
-        if len(user) > 8000:
-            return ()
-        if SECRET.search(user):
+        receipt = self.db.execute(
+            "SELECT 1 FROM long_memory_extraction_receipts WHERE turn_id=?", (turn_id,)
+        ).fetchone()
+        if receipt:
             return ()
         row = self.db.execute("SELECT user_text FROM turns WHERE id=?", (turn_id,)).fetchone()
         if row is None or row[0] != user:
             raise ValueError("memory source mismatch")
+
+        # No backfill or assistant output. Unsafe/oversized source turns are
+        # intentionally marked processed so they are not retried forever.
+        if len(user) > 8000 or SECRET.search(user):
+            with self.db:
+                self.db.execute("""
+                    INSERT OR IGNORE INTO long_memory_extraction_receipts(turn_id)
+                    VALUES(?)
+                """, (turn_id,))
+            return ()
+
         q = terms(user)
         active = sorted(self.list_active(),
                         key=lambda m: (len(q & (terms(m.key) | terms(m.quote))), m.id),
@@ -276,8 +293,6 @@ class LongMemory:
                  "blocked_keys": self.blocked_keys()[:100]},
                 ensure_ascii=False)}
         ])
-        # Keep direct write() atomic. Model batches may contain independent
-        # mistakes: validate each item, then use per-item savepoints in one transaction.
         try:
             data = json.loads(raw)
         except (TypeError, ValueError) as exc:
@@ -297,10 +312,15 @@ class LongMemory:
         self.last_extract_rejected += len(candidates) - len(unique)
         ids = []
         with self.db:
-            # Explicit BEGIN is necessary: releasing the outermost savepoint
-            # otherwise commits immediately under sqlite3's default mode.
             if not self.db.in_transaction:
                 self.db.execute("BEGIN")
+            # A second worker or a retry after a committed write must not
+            # invoke the model or create another revision for this source turn.
+            if self.db.execute(
+                "SELECT 1 FROM long_memory_extraction_receipts WHERE turn_id=?",
+                (turn_id,),
+            ).fetchone():
+                return ()
             for candidate in unique:
                 self.db.execute("SAVEPOINT memory_item")
                 try:
@@ -311,8 +331,12 @@ class LongMemory:
                     self.last_extract_rejected += 1
                 finally:
                     self.db.execute("RELEASE memory_item")
-        if data and self.last_extract_rejected == len(data):
-            raise ValueError("all extracted candidates rejected")
+            if data and self.last_extract_rejected == len(data):
+                raise ValueError("all extracted candidates rejected")
+            self.db.execute("""
+                INSERT OR IGNORE INTO long_memory_extraction_receipts(turn_id)
+                VALUES(?)
+            """, (turn_id,))
         return tuple(ids)
 
     def write(self, turn_id: int, candidates: list[tuple]) -> tuple[int, ...]:
