@@ -48,6 +48,18 @@ PERSONAL_QUERY_CUES = (
     "我重视什么", "为什么我会", "取舍", "变化", "改变",
     "以前和现在",
 )
+LISTEN_ONLY_CUES = (
+    "先别给我方案", "我只是想说说", "我只是想倾诉",
+    "先听我说", "先听我讲", "不用给建议", "不需要建议",
+)
+THIRD_PARTY_ONLY_CUES = (
+    "我只是听他吐槽", "我只是听她吐槽", "我只是听朋友吐槽",
+    "只是替朋友问", "只是帮朋友问",
+)
+TRANSIENT_MOOD_CUES = (
+    "今天有点烦", "今天有点累", "今天心情不好",
+    "明天应该就好了", "现在有点烦",
+)
 REFLECTIVE_DIMENSIONS = {"values", "motivation", "needs", "patterns",
                          "cognition", "self_concept", "constraints",
                          "goals", "tensions"}
@@ -56,18 +68,19 @@ UPDATE_PROMPT = """你是个人理解更新引擎，不是对话助手。输入 
 从多轮用户表达中谨慎提取长期有价值的证据，提出可修正理解；宁缺毋滥。
 1. 只能从 user_text 提取证据。assistant_text 仅用于验证确认问题是否真实问出，绝不能作为用户事实。
 2. evidence.quote 必须逐字复制对应 user_text 中完整、连续、语义完整的片段，保留否定、条件、时间、归属、转折和不确定性。turn_index 必须指向真实输入轮次。
-3. 第三方说法、转述、假设、反问、引用、普通闲聊、短暂情绪和一次性临时状态，不得当作用户长期特征。
+3. 第三方说法、转述、假设、反问、引用、普通闲聊、短暂情绪和一次性临时状态，不得当作用户长期特征；但具有明显情感意义、可能帮助理解人生价值的个人经历，可以作为事件级、低置信度理解保留，不能泛化为稳定人格。
 4. 不推断敏感属性、医学诊断、身份类别、政治/宗教/性取向或第三方隐私；不记录密码、密钥、证件、金融凭据。
 5. Claim 是有限认识，不是人格标签或客观真理。区分用户明确陈述、自我解释、模型推断和重复表达。
 6. 不要把具体手段误认为终极目标；不要把短期目标说成长期价值。不同场景的张力应保留，不强行消除。
 7. 只使用候选中的 claim_id 和 version，不得虚构 ID。每个旧 Claim 最多提出一个操作。
+   对现有 Claim 执行 REFINE 或 SUPERSEDE 时，如果当前版本的历史证据仍支持或限定新版本，可在 prior_evidence 中选择性重挂；只能使用 current_claims.evidence 提供的 evidence_id。不要重挂无关证据。REINFORCE、DISPUTE、REJECT、EXPIRE 会由程序自动保留当前版本证据，不要在 prior_evidence 重复填写。
 8. CREATE=新认识；REINFORCE=新证据支持原命题且内容不变；REFINE=增加限定；SUPERSEDE=用户明确改变/纠正同一认识；DISPUTE=冲突原因不明；REJECT=用户明确否定该 AI 理解；EXPIRE=明确过时的时间性认识。
 9. 不同情境分别成立时用 scope 限定，不要覆盖；无法解释的矛盾应保留证据并 DISPUTE。
 10. 普通输入可返回空 evidence 和 operations。不要为凑数创建画像。
 11. 重要且不确定的推断，只有当它实质影响建议且助手确实在自然回复中提出确认问题时，才填写 confirmation。question 必须逐字出现在 assistant_text 中。
 12. 输出严格 JSON，不要 Markdown 或解释：
 {"evidence":[{"ref":"e1","turn_index":0,"quote":"用户原话连续片段","kind":"direct_statement|self_interpretation|correction|experience|outcome_feedback|context","event_time":null}],
- "operations":[{"operation":"CREATE|REINFORCE|REFINE|SUPERSEDE|DISPUTE|REJECT|EXPIRE","claim_ref":"c1或null","claim_id":null,"expected_version":null,"content":"有限的一句话理解","dimension":"values|motivation|needs|goals|patterns|cognition|self_concept|constraints|tensions","basis":"explicit_statement|self_interpretation|ai_inference|repeated_expression|reported_outcome","scope":{},"temporal_scope":"时间/情境限定/unknown","evidence":[{"ref":"e1","relation":"support|counter|qualifies"}],"reason":"修订原因"}],
+ "operations":[{"operation":"CREATE|REINFORCE|REFINE|SUPERSEDE|DISPUTE|REJECT|EXPIRE","claim_ref":"c1或null","claim_id":null,"expected_version":null,"content":"有限的一句话理解","dimension":"values|motivation|needs|goals|patterns|cognition|self_concept|constraints|tensions","basis":"explicit_statement|self_interpretation|ai_inference|repeated_expression|reported_outcome","scope":{},"temporal_scope":"时间/情境限定/unknown","evidence":[{"ref":"e1","relation":"support|counter|qualifies"}],"prior_evidence":[{"evidence_id":123,"relation":"support|counter|qualifies"}],"reason":"修订原因"}],
  "confirmation":null}
 CREATE 时 claim_ref 是本批唯一短标识，claim_id 和 expected_version 为 null。
 其他操作时 claim_ref 为 null，claim_id 和 expected_version 必须匹配候选。
@@ -152,8 +165,10 @@ def _validate_scope(scope) -> dict:
     return scope
 
 
-def parse_proposal(raw: str, turns: list[dict], claims: list[Claim]) -> dict:
+def parse_proposal(raw: str, turns: list[dict], claims: list[Claim],
+                   existing_evidence_by_claim: dict[str, set[int]] | None = None) -> dict:
     """Validate every model reference before any database write."""
+    existing_evidence_by_claim = existing_evidence_by_claim or {}
     data = _parse_json(raw)
     if not isinstance(data, dict) or set(data) - {"evidence", "operations", "confirmation"}:
         raise ValueError("invalid proposal envelope")
@@ -201,7 +216,8 @@ def parse_proposal(raw: str, turns: list[dict], claims: list[Claim]) -> dict:
             "operation", "claim_ref", "claim_id", "expected_version", "content",
             "dimension", "basis", "scope", "temporal_scope", "evidence", "reason",
         }
-        if not isinstance(op, dict) or set(op) != required:
+        if (not isinstance(op, dict) or not required.issubset(op)
+                or set(op) - required - {"prior_evidence"}):
             raise ValueError("invalid claim operation")
         operation = op["operation"]
         if operation not in OPERATIONS:
@@ -255,11 +271,29 @@ def parse_proposal(raw: str, turns: list[dict], claims: list[Claim]) -> dict:
                 raise ValueError("operation references invalid or duplicate evidence")
             seen_evidence_refs.add(ref)
             normalized_refs.append((ref, relation))
-        relations = {relation for _, relation in normalized_refs}
+        prior_refs = op.get("prior_evidence", [])
+        if not isinstance(prior_refs, list) or len(prior_refs) > 12:
+            raise ValueError("invalid prior evidence")
+        normalized_prior = []
+        seen_prior_ids = set()
+        allowed_prior_ids = existing_evidence_by_claim.get(claim_id, set())
+        for prior in prior_refs:
+            if not isinstance(prior, dict) or set(prior) != {"evidence_id", "relation"}:
+                raise ValueError("invalid prior evidence reference")
+            evidence_id, relation = prior["evidence_id"], prior["relation"]
+            if (type(evidence_id) is not int or evidence_id <= 0
+                    or evidence_id not in allowed_prior_ids
+                    or relation not in RELATIONS or evidence_id in seen_prior_ids):
+                raise ValueError("prior evidence is not attached to the target claim version")
+            seen_prior_ids.add(evidence_id)
+            normalized_prior.append((evidence_id, relation))
+        if operation == "CREATE" and normalized_prior:
+            raise ValueError("new claims cannot reuse prior evidence")
+        relations = {relation for _, relation in normalized_refs + normalized_prior}
         if operation == "EXPIRE":
-            if normalized_refs:
+            if normalized_refs or normalized_prior:
                 raise ValueError("EXPIRE must not introduce evidence")
-        elif not normalized_refs:
+        elif not normalized_refs and not normalized_prior:
             raise ValueError("claim operation requires evidence")
         if operation in {"CREATE", "REFINE", "SUPERSEDE", "REINFORCE"}:
             if not relations & {"support", "qualifies"} or "counter" in relations:
@@ -278,7 +312,7 @@ def parse_proposal(raw: str, turns: list[dict], claims: list[Claim]) -> dict:
             "expected_version": expected_version, "content": content,
             "dimension": dimension, "basis": basis, "scope": scope,
             "temporal_scope": temporal_scope, "evidence": normalized_refs,
-            "reason": reason,
+            "prior_evidence": normalized_prior, "reason": reason,
         })
 
     confirmation = data.get("confirmation")
@@ -737,26 +771,32 @@ class PersonalUnderstanding:
         if not turns:
             return UnderstandingEvent(processed_job_ids=tuple(job_ids))
         claims=self._candidate_claims("\n".join(t["user_text"] for t in turns))
+        current_claims_payload = []
+        existing_evidence_by_claim = {}
+        for c in claims:
+            evidence_rows = self.db.execute("""
+                SELECT e.id,e.quote,e.kind,ce.relation,e.recorded_at
+                FROM understanding_claim_evidence ce
+                JOIN understanding_evidence e ON e.id=ce.evidence_id
+                WHERE ce.claim_version_id=? ORDER BY e.id DESC LIMIT 4
+            """, (c.version_id,)).fetchall()
+            existing_evidence_by_claim[c.id] = {row[0] for row in evidence_rows}
+            current_claims_payload.append({
+                "claim_id":c.id,"version":c.version,"content":c.content,
+                "dimension":c.dimension,"basis":c.basis,"scope":c.scope,
+                "temporal_scope":c.temporal_scope,"support_level":c.support_level,
+                "user_validation":c.user_validation,"status":c.status,
+                "evidence":[
+                    {"evidence_id":e[0],"quote":e[1],"kind":e[2],
+                     "relation":e[3],"recorded_at":e[4]}
+                    for e in evidence_rows
+                ],
+            })
         payload={
             "turns":[{"turn_index":i,"source_turn_id":item["turn_id"],
                       "user_text":item["user_text"],"assistant_text":item["assistant_text"],
                       "recorded_at":item["recorded_at"]} for i,item in enumerate(turns)],
-            "current_claims":[
-                {"claim_id":c.id,"version":c.version,"content":c.content,
-                 "dimension":c.dimension,"basis":c.basis,"scope":c.scope,
-                 "temporal_scope":c.temporal_scope,"support_level":c.support_level,
-                 "user_validation":c.user_validation,"status":c.status,
-                 "evidence":[
-                     {"quote":e[0],"kind":e[1],"relation":e[2],"recorded_at":e[3]}
-                     for e in self.db.execute("""
-                         SELECT e.quote,e.kind,ce.relation,e.recorded_at
-                         FROM understanding_claim_evidence ce
-                         JOIN understanding_evidence e ON e.id=ce.evidence_id
-                         WHERE ce.claim_version_id=? ORDER BY e.id DESC LIMIT 2
-                     """,(c.version_id,))
-                 ]}
-                for c in claims
-            ],
+            "current_claims":current_claims_payload,
             "rules":{"max_turns":MAX_TURNS_PER_BATCH,"no_write_is_valid":True,
                      "source_of_evidence":"user_text_only"},
         }
@@ -770,7 +810,7 @@ class PersonalUnderstanding:
                 {"role":"system","content":UPDATE_PROMPT},
                 {"role":"user","content":json.dumps(payload,ensure_ascii=False)},
             ])
-            proposal=parse_proposal(raw,turns,claims)
+            proposal=parse_proposal(raw,turns,claims,existing_evidence_by_claim)
             written=self._apply_proposal(proposal,turns,claims)
             with self.db:
                 marks=",".join("?" for _ in job_ids)
@@ -877,6 +917,13 @@ class PersonalUnderstanding:
                         SELECT ?,evidence_id,relation FROM understanding_claim_evidence WHERE claim_version_id=?
                     """,(version_id,previous[1]))
                 new_evidence_ids=[]
+                if operation not in {"REINFORCE","DISPUTE","REJECT","EXPIRE"}:
+                    for evidence_id,relation in op.get("prior_evidence", []):
+                        self.db.execute("""
+                            INSERT OR IGNORE INTO understanding_claim_evidence
+                            (claim_version_id,evidence_id,relation) VALUES(?,?,?)
+                        """,(version_id,evidence_id,relation))
+                        new_evidence_ids.append(evidence_id)
                 for ref,relation in op["evidence"]:
                     evidence_id=ensure_evidence(ref)
                     self.db.execute("""
