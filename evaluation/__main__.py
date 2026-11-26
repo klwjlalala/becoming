@@ -26,8 +26,11 @@ def load_cases():
         if case["id"] in seen:
             raise ValueError("Duplicate case id")
         seen.add(case["id"])
-        if "long_memory" in case and not isinstance(case["long_memory"], bool):
-            raise ValueError("Invalid long_memory flag")
+        for flag in ("long_memory", "semantic_memory"):
+            if flag in case and not isinstance(case[flag], bool):
+                raise ValueError(f"Invalid {flag} flag")
+        if case.get("semantic_memory") and not case.get("long_memory"):
+            raise ValueError("semantic_memory requires long_memory")
         for key in ("turns", "criteria"):
             values = case.get(key)
             if not isinstance(values, list) or not values or not all(
@@ -61,7 +64,7 @@ def main():
         )
         store = SQLiteConversationStore(":memory:")
         try:
-            memory = LongMemory(store, model) if case.get("long_memory") else None
+            memory = LongMemory(store, model, semantic=case.get("semantic_memory", False)) if case.get("long_memory") else None
             agent = Agent(model, store, history_turns=0 if memory else 12, long_memory=memory)
             print(f"Case: {case['id']} {case['title']}")
             for turn in case["turns"]:

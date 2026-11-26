@@ -29,7 +29,7 @@ class Agent:
         if self.long_memory is not None:
             try:
                 memories = self.long_memory.retrieve(text)
-            except (sqlite3.Error, ValueError):
+            except (ModelError, sqlite3.Error, ValueError):
                 errors.append("retrieve_failed")
         system = SYSTEM_PROMPT
         if memories:

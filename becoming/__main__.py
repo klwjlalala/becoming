@@ -15,7 +15,10 @@ def main() -> int:
     parser.add_argument("--demo", action="store_true", help="Offline mock model")
     parser.add_argument("--db", default=None, help="SQLite file or :memory:")
     parser.add_argument("--long-memory", action="store_true", help="Opt in to model-based long-term memory")
+    parser.add_argument("--semantic-memory", action="store_true", help="Opt in to an extra model call for memory selection")
     args = parser.parse_args()
+    if args.semantic_memory and not args.long_memory:
+        parser.error("--semantic-memory requires --long-memory")
     if args.demo and args.long_memory:
         parser.error("--long-memory requires a real model")
     try:
@@ -36,7 +39,7 @@ def main() -> int:
         return 1
 
     try:
-        memory = LongMemory(store, model) if args.long_memory else None
+        memory = LongMemory(store, model, semantic=args.semantic_memory) if args.long_memory else None
     except sqlite3.Error as exc:
         store.close()
         print(f"Memory startup failed: {exc}", file=sys.stderr)
@@ -45,8 +48,11 @@ def main() -> int:
     print("Becoming | " + ("离线模拟" if args.demo else "真实模型（发送最近对话到配置服务）"))
     print("/exit 退出 | /clear 清除当前对话历史")
     if memory is not None:
-        print("长期记忆已启用：每轮回复后额外发送当前输入及有限槽位名称；相关记忆可能随回复请求发送。")
-        print("/memories 查看 | /forget <key> 删除记忆及其修订（不删除原始对话）")
+        print("长期记忆已启用：每轮回复后额外发送当前输入及有限历史记忆原话；相关记忆可能随回复请求发送。")
+        if args.semantic_memory:
+            print("语义检索已启用：最多40条候选原话发送给模型做筛选，增加一次模型调用。")
+        print("/memories 查看 | /forget <key> 删除并阻止同槽位重新写入 | /allow <key> 恢复未来写入")
+        print("删除记忆不删除原始对话；/clear 清除对话与关联记忆，保留阻止写入的槽位名称。")
     try:
         while True:
             text = input("你：").strip()
@@ -61,14 +67,26 @@ def main() -> int:
             if memory is not None and text == "/memories":
                 for item in memory.list_active():
                     print(f"{item.key} [{item.category}] #{item.source_turn_id}: {item.quote}")
+                for key in memory.blocked_keys():
+                    print(f"{key} [已阻止写入]")
                 continue
             if memory is not None and (text == "/forget" or text.startswith("/forget ")):
                 key = text[len("/forget"):].strip()
                 if not key:
                     print("用法：/forget <key>")
                 else:
-                    count = memory.forget(key)
-                    print(f"已逻辑删除 {count} 条记忆修订；原始对话仍保留。")
+                    try:
+                        count = memory.forget(key)
+                        print(f"已逻辑删除 {count} 条记忆修订并阻止同槽位写入；原始对话仍保留。")
+                    except ValueError as exc:
+                        print(f"Error: {exc}", file=sys.stderr)
+                continue
+            if memory is not None and (text == "/allow" or text.startswith("/allow ")):
+                try:
+                    changed = memory.allow(text[len("/allow"):].strip())
+                    print("允许未来写入，旧数据不会恢复。" if changed else "该槽位未被阻止。")
+                except ValueError as exc:
+                    print(f"Error: {exc}", file=sys.stderr)
                 continue
             if not text:
                 continue

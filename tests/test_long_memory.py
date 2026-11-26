@@ -51,7 +51,7 @@ class LongMemoryTests(unittest.TestCase):
         t2 = self.store.append_turn("我是工程师", "好")
         a, = memory.write(t1, [("职业", "fact", "我是木工")])
         self.assertEqual(memory.write(t1, [("职业", "fact", "我是木工")]), ())
-        b, = memory.write(t2, [("职业", "fact", "我是工程师")])
+        b, = memory.write(t2, [("职业", "fact", "我是工程师", a)])
         self.assertNotEqual(a, b)
         self.assertEqual([m.quote for m in memory.retrieve("职业")], ["我是工程师"])
         self.assertEqual(memory.forget("职业"), 2)

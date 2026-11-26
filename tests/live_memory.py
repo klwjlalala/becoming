@@ -15,7 +15,7 @@ class LiveMemoryTest(unittest.TestCase):
                                       os.environ["BECOMING_MODEL"])
         store = SQLiteConversationStore(":memory:")
         self.addCleanup(store.close)
-        memory = LongMemory(store, model)
+        memory = LongMemory(store, model, semantic=True)
         agent = Agent(model, store, history_turns=0, long_memory=memory)
         marker = "BE-" + uuid.uuid4().hex[:8]
         agent.reply(f"请将这条虚构信息保存为长期事实记忆，key 使用 test_code：我的测试代号是 {marker}。")
@@ -37,3 +37,6 @@ class LiveMemoryTest(unittest.TestCase):
         self.assertIn(active[0].id, agent.last_memory_event.written_ids)
         self.assertGreaterEqual(memory.forget(key), 2)
         self.assertFalse(any(m.key == key for m in memory.list_active()))
+        agent.reply(f"请将这条虚构信息再次保存为长期事实记忆，key 使用 {key}：我的测试代号是 {new}。")
+        self.assertFalse(any(m.key == key for m in memory.list_active()))
+        self.assertIn(key, memory.blocked_keys())

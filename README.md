@@ -56,3 +56,7 @@ PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前
 ## 长期记忆 V1（实验、默认关闭）
 
 真实模型配置完成后，使用 `python -m becoming --long-memory` 显式开启；每个正常回复后最多额外一次模型调用。`/memories` 查看活跃记忆，`/forget <key>` 删除槽位所有修订但保留原始对话，`/clear` 同时清除对话及关联长期记忆（逻辑删除）。模型可能看到有限相关记忆及槽位名称。详见 [长期记忆 V1](docs/long-memory.md)。
+
+### V1.1 实验功能
+
+`python -m becoming --long-memory --semantic-memory` 可选模型语义筛选（每轮最多额外一次调用，最多发送40条记忆原话）。`/forget <key>` 同时阻止同 key 后续写入；`/allow <key>` 解除阻止，不恢复原数据。`/clear` 保留阻止槽位名称。原始对话与近义别名不受单槽位删除保证。提取时会发送有限旧记忆原话供修订判断。
