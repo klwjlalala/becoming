@@ -59,6 +59,16 @@ class AppRuntime:
         self.demo = isinstance(model, DemoModel)
         self.enable_long_memory = enable_long_memory
         self.enable_personal_understanding = enable_personal_understanding
+        # Bootstrap user-level memory schemas once. Per-conversation agents
+        # reuse these tables without rerunning DDL or resetting live jobs.
+        bootstrap_model = self.model or DemoModel()
+        default_store = self.store.for_conversation("default")
+        if self.enable_long_memory:
+            LongMemory(default_store, bootstrap_model)
+        if self.enable_personal_understanding:
+            PersonalUnderstanding(
+                default_store, bootstrap_model, recover_running_jobs=False
+            )
         self.agents: dict[str, GrowthAgent] = {}
         self.pending_growth_changes: dict[str, dict] = {}
         self.pending_data_clears: set[str] = set()
@@ -144,10 +154,13 @@ class AppRuntime:
             return existing
         model = self.require_model()
         scoped = self.store.for_conversation(conversation_id)
-        memory = LongMemory(scoped, model) if self.enable_long_memory else None
+        memory = (
+            LongMemory(scoped, model, initialize_schema=False)
+            if self.enable_long_memory else None
+        )
         understanding = (
             PersonalUnderstanding(
-                scoped, model, recover_running_jobs=False
+                scoped, model, recover_running_jobs=False, initialize_schema=False
             ) if self.enable_personal_understanding else None
         )
         agent = GrowthAgent(
@@ -162,12 +175,13 @@ class AppRuntime:
 
     def memory_manager(self) -> LongMemory:
         scoped = self.store.for_conversation("default")
-        return LongMemory(scoped, self.model or DemoModel())
+        return LongMemory(scoped, self.model or DemoModel(), initialize_schema=False)
 
     def understanding_manager(self) -> PersonalUnderstanding:
         scoped = self.store.for_conversation("default")
         return PersonalUnderstanding(
-            scoped, self.model or DemoModel(), recover_running_jobs=False
+            scoped, self.model or DemoModel(), recover_running_jobs=False,
+            initialize_schema=False
         )
 
     def start_background_worker(self) -> None:
