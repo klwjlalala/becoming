@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from becoming.api_runtime import AppRuntime
 from becoming.background import BackgroundWorker
 from becoming.memory import SQLiteConversationStore
 from becoming.long_memory import LongMemory
@@ -352,6 +353,20 @@ class BackgroundWorkerTests(unittest.TestCase):
             self.assertEqual(model.calls, 1)
         finally:
             worker.stop()
+
+    def test_in_memory_runtime_reports_stable_status_without_worker(self):
+        runtime = AppRuntime(
+            db_path=":memory:", growth_db_path=":memory:", model=EmptyModel()
+        )
+        try:
+            status = runtime.background_status()
+            self.assertFalse(status["supported"])
+            self.assertFalse(status["running"])
+            self.assertFalse(status["paused"])
+            self.assertEqual(status["active_jobs"], 0)
+            self.assertEqual(status["counts"]["pending"], 0)
+        finally:
+            runtime.close()
 
     def test_personal_understanding_jobs_run_off_the_request_path(self):
         store = SQLiteConversationStore(self.db_path)
