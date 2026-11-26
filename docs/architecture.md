@@ -58,11 +58,16 @@ flowchart LR
 
 当前产品化方向不先开发 Web 页面。FastAPI/Uvicorn 服务通过 `becoming-api` 启动，默认只监听 loopback；Electron 客户端后续复用同一套 JSON API。
 
-- `becoming/api.py`：版本化路由、Pydantic 请求校验、统一错误响应、request ID。
-- `becoming/api_runtime.py`：单用户运行时、模型配置、会话 Agent 装配和 SQLite 生命周期。
-- `becoming/memory.py`：新增 conversations 表及 turns.conversation_id 迁移；旧 CLI turns 归入 default 会话，近期上下文按会话隔离。
-- `docs/api-v1.md`：路由契约、启动方式、安全边界和 GitHub HTTP 联调说明。
+- `becoming/api.py`：版本化路由、Pydantic 请求校验、统一错误响应、request ID，以及后台任务查询接口。
+- `becoming/api_runtime.py`：单用户运行时、模型配置、会话 Agent 装配、worker 生命周期和 SQLite 生命周期。
+- `becoming/background.py`：独立连接的单进程后台 worker，负责长期记忆提取和个人理解更新的持久化调度、重试与恢复。
+- `becoming/memory.py`：新增 conversations、background_jobs 表及 turns.conversation_id 迁移；旧 CLI turns 归入 default 会话，近期上下文按会话隔离；消息轮次和后台任务在同一事务入队。
+- `becoming/long_memory.py`：每个来源轮次使用 extraction receipt 保证记忆提取重试幂等。
+- `becoming/personal_understanding.py`：保留原有专用批处理队列；命题写入与内部 job done 状态原子提交，并支持跨会话隔离的延迟确认补偿。
+- `docs/api-v1.md`：路由契约、后台任务状态、启动方式、安全边界和 GitHub HTTP 联调说明。
 
-当前 API 已覆盖健康检查、模型配置/连接测试、会话 CRUD、消息发送、成长预览/确认、长期记忆查看/遗忘、个人理解查看、数据导出和全量清除。GitHub Actions 会启动真实 loopback HTTP 服务，使用本地兼容模型 stub 和临时 SQLite 数据执行接口级联调。
+当前 API 已覆盖健康检查、模型配置/连接测试、会话 CRUD、消息发送、成长预览/确认、长期记忆查看/遗忘、个人理解查看、后台任务状态、数据导出和全量清除。HTTP 消息请求只负责主回复和原子入队；后台 worker 使用独立 SQLite 连接执行记忆提取与个人理解更新，不占用 API runtime 锁。任务最多尝试 3 次，进程重启会恢复中断任务；来源对话删除时任务通过外键级联清理。
 
-**当前限制**：API 是本地单用户同步服务；Agent.reply() 仍会在主回复后同步执行长期记忆提取及个人理解处理，尚未切换到持久化后台 worker。token streaming、可靠取消、多用户认证、远程部署安全和系统密钥库接入均未实现。模型密钥通过 API 更新时只保存在进程内存；未来 Electron Main 负责系统安全存储与启动时注入。当前阶段不做 Web/Electron 页面。
+GitHub Actions 会启动真实 loopback HTTP 服务和本地兼容模型 stub，验证主回复不等待被阻塞的记忆提取、后台任务状态、重试、重启恢复、记忆提取幂等及个人理解处理。
+
+**当前限制**：API 是本地单用户、单进程单 worker 服务；主聊天模型调用仍同步，后台任务模型调用也使用同步 HTTP，但与聊天请求解耦。尚未提供多 worker 竞争消费、账号认证、多租户隔离、远程部署安全、token streaming 或可靠取消。模型密钥通过 API 更新时只保存在进程内存；未来 Electron Main 负责系统安全存储与启动时注入。当前阶段不做 Web/Electron 页面。
