@@ -1,6 +1,6 @@
 name: Personal understanding live evaluation (manual)
 
-# Re-run after reflective retrieval was expanded to include goals and constraints.
+# Re-run after date-aware fixture replay, evidence-lineage, and retrieval-suppression fixes.
 # A push to this branch with the dedicated trigger commit message runs the one-shot live evaluation.
 
 on:
@@ -64,7 +64,7 @@ jobs:
         run: |
           python -m evaluation.personal_understanding \
             --live \
-            --max-calls 80 \
+            --max-calls 60 \
             --output artifacts/personal-understanding-live.json
       - name: Upload report
         if: always()
