@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from typing import Protocol, TypedDict, Literal, Sequence
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener, HTTPRedirectHandler
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 
@@ -24,6 +24,13 @@ class ModelError(RuntimeError):
 class DemoModel:
     def complete(self, messages: Sequence[Message]) -> str:
         return "【模拟模型】对话链路运行正常；配置真实模型后即可进行自然交流。"
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Do not forward private conversation content or credentials to any
+        # redirect target, including a downgrade to HTTP.
+        raise HTTPError(req.full_url, code, "Model redirect refused", headers, fp)
 
 
 class OpenAICompatibleModel:
@@ -52,7 +59,7 @@ class OpenAICompatibleModel:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with build_opener(NoRedirect()).open(request, timeout=self.timeout) as response:
                 payload = json.load(response)
             reply = payload["choices"][0]["message"]["content"]
         except HTTPError as exc:
