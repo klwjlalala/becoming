@@ -9,15 +9,22 @@ import { operations, registerIPC } from '../main/ipc.mjs';
 import { createWindow, loadWindow, trustedSender } from '../main/window.mjs';
 const timer = setTimeout(() => { console.error('Electron smoke timeout'); app.exit(1); }, 90000);
 let directory, service, win, dispose, exit = 0;
+async function main() {
 try {
+  console.log('smoke: waiting for app ready');
   await app.whenReady();
+  console.log('smoke: app ready');
   directory = await mkdtemp(join(tmpdir(), 'becoming-electron-'));
   service = new BecomingService({ dataDir: directory });
   const models = new ModelController(service, new ModelVault({ file: join(directory, 'model.enc'), safeStorage }));
   await models.start({ demo: true });
+  console.log('smoke: Python service ready');
   win = createWindow({ show: false });
   dispose = registerIPC(ipcMain, operations(service, models, async () => false), event => trustedSender(win, event));
+  win.webContents.on('preload-error', (_event, _path, error) => console.error('smoke: preload error', error.message));
+  win.webContents.on('render-process-gone', (_event, details) => console.error('smoke: renderer gone', details.reason));
   await loadWindow(win);
+  console.log('smoke: window loaded');
   const result = await win.webContents.executeJavaScript(`(async () => {
     const bridge = window.becoming;
     const health = await bridge.health();
@@ -29,6 +36,7 @@ try {
     return {health, model, message, history, clear, node: typeof require,
       generic: typeof bridge.request, token: typeof bridge.token};
   })()`);
+  console.log('smoke: IPC returned');
   assert.equal(result.health.ok, true);
   assert.equal(result.model.ok, true);
   assert.equal(result.model.result.demo, true);
@@ -43,8 +51,14 @@ try {
 finally {
   dispose?.();
   if (win && !win.isDestroyed()) win.destroy();
+  console.log('smoke: stopping service');
   await service?.stop().catch(() => { exit = 1; });
   if (directory) await rm(directory, { recursive: true, force: true }).catch(() => { exit = 1; });
   clearTimeout(timer);
   app.exit(exit);
 }
+
+}
+// Do not await app readiness at ESM module scope: Electron must finish loading
+// the entry module before it can signal readiness.
+void main();
