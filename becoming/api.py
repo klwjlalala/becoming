@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
+import threading
 import re
 import secrets
 import time
@@ -46,6 +49,7 @@ class ConversationUpdateInput(BaseModel):
 
 class MessageInput(BaseModel):
     content: str = Field(min_length=1, max_length=8000)
+    request_id: str | None = Field(default=None, min_length=8, max_length=128)
 
 
 class ConfirmationInput(BaseModel):
@@ -172,6 +176,10 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
     def runtime_for(request: Request) -> AppRuntime:
         return request.app.state.runtime
 
+    def require_idle_chat(rt: AppRuntime):
+        if rt.active_chat_thread is not None:
+            raise APIError(409, "chat_busy", "对话仍在生成，请在生成结束后重试此操作。")
+
     def require_conversation(rt: AppRuntime, conversation_id: str):
         conversation = rt.store.get_conversation(conversation_id)
         if conversation is None:
@@ -249,6 +257,7 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
     def put_model_config(payload: ModelConfigInput, request: Request):
         rt = runtime_for(request)
         with rt.lock:
+            require_idle_chat(rt)
             try:
                 result = rt.configure_model(
                     base_url=payload.base_url,
@@ -262,17 +271,16 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
     @app.post("/api/v1/model/test")
     def test_model(payload: ModelConfigInput, request: Request):
         rt = runtime_for(request)
-        with rt.lock:
-            try:
-                rt.test_model(
-                    base_url=payload.base_url,
-                    api_key=payload.api_key,
-                    model=payload.model,
-                )
-            except ModelError as exc:
-                raise APIError(502, "model_connection_failed", str(exc)) from None
-            except ValueError as exc:
-                raise APIError(422, "invalid_model_config", str(exc)) from None
+        try:
+            rt.test_model(
+                base_url=payload.base_url,
+                api_key=payload.api_key,
+                model=payload.model,
+            )
+        except ModelError as exc:
+            raise APIError(502, "model_connection_failed", str(exc)) from None
+        except ValueError as exc:
+            raise APIError(422, "invalid_model_config", str(exc)) from None
         return {"success": True, "model": payload.model}
 
     @app.get("/api/v1/conversations")
@@ -315,6 +323,7 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
         if not changes:
             raise APIError(422, "empty_update", "至少需要提供一个修改字段。")
         with rt.lock:
+            require_idle_chat(rt)
             try:
                 if "title" in changes and changes["title"] is not None:
                     rt.store.rename_conversation(conversation_id, changes["title"])
@@ -329,6 +338,7 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
     def delete_conversation(conversation_id: str, request: Request):
         rt = runtime_for(request)
         with rt.lock:
+            require_idle_chat(rt)
             worker = rt.background_worker
             if worker is not None and not worker.pause(timeout=5.0):
                 worker.resume()
@@ -367,7 +377,40 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
         rt = runtime_for(request)
         with rt.lock:
             require_conversation(rt, conversation_id)
+            require_idle_chat(rt)
             agent = get_agent(rt, conversation_id)
+            request_id = payload.request_id
+            db = rt.store.connection
+            if not payload.content.strip():
+                raise APIError(422, "invalid_message", "消息不能为空。")
+            if request_id is not None:
+                if not re.fullmatch(r"[A-Za-z0-9._-]{8,128}", request_id):
+                    raise APIError(422, "invalid_request_id", "消息请求标识无效。")
+                digest = hashlib.sha256(payload.content.encode("utf-8")).hexdigest()
+                existing = db.execute(
+                    "SELECT content_hash,response_json FROM api_message_requests "
+                    "WHERE conversation_id=? AND request_id=?",
+                    (conversation_id, request_id),
+                ).fetchone()
+                if existing:
+                    if existing[0] != digest:
+                        raise APIError(409, "request_id_conflict", "同一请求标识不能用于不同消息。")
+                    if existing[1] is None:
+                        raise APIError(409, "request_outcome_unknown", "此前请求结果未确认，请先刷新历史记录。")
+                    result = json.loads(existing[1])
+                    pending = agent.adapter.pending
+                    confirmation = result.get("confirmation")
+                    if confirmation and (pending is None or pending[0] != confirmation["token"]):
+                        result["confirmation"] = None
+                        result["confirmation_required"] = False
+                        result["confirmation_expired"] = True
+                    return result
+                with db:
+                    db.execute(
+                        "INSERT INTO api_message_requests(conversation_id,request_id,content_hash) VALUES(?,?,?)",
+                        (conversation_id, request_id, digest),
+                    )
+            rt.active_chat_thread = threading.get_ident()
             try:
                 answer = agent.reply(
                     payload.content, defer_post_turn=rt.background_supported
@@ -376,6 +419,8 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
                 raise APIError(502, "model_request_failed", str(exc)) from None
             except ValueError as exc:
                 raise APIError(422, "invalid_message", str(exc)) from None
+            finally:
+                rt.active_chat_thread = None
 
             if rt.background_supported:
                 rt.wake_background_worker()
@@ -391,7 +436,7 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
                 )
             scoped = rt.store.for_conversation(conversation_id)
             last = scoped.list_messages(limit=1)
-            return {
+            result = {
                 "reply": answer,
                 "message_id": last[-1]["id"] if last else None,
                 "growth_event": _plain(agent.last_event),
@@ -400,11 +445,19 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
                 "memory_event": _plain(agent.last_memory_event),
                 "understanding_event": _plain(agent.last_understanding_event),
             }
+            if request_id is not None:
+                with db:
+                    db.execute(
+                        "UPDATE api_message_requests SET response_json=? WHERE conversation_id=? AND request_id=?",
+                        (json.dumps(result, ensure_ascii=False), conversation_id, request_id),
+                    )
+            return result
 
     @app.post("/api/v1/conversations/{conversation_id}/confirm")
     def confirm_growth(conversation_id: str, payload: ConfirmationInput, request: Request):
         rt = runtime_for(request)
         with rt.lock:
+            require_idle_chat(rt)
             require_conversation(rt, conversation_id)
             agent = get_agent(rt, conversation_id)
             try:
@@ -417,6 +470,7 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
     def cancel_growth(conversation_id: str, request: Request):
         rt = runtime_for(request)
         with rt.lock:
+            require_idle_chat(rt)
             require_conversation(rt, conversation_id)
             agent = get_agent(rt, conversation_id)
             answer = agent.reply("/cancel")
@@ -460,6 +514,7 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
     def confirm_growth_change(token: str, request: Request):
         rt = runtime_for(request)
         with rt.lock:
+            require_idle_chat(rt)
             pending = rt.pending_growth_changes.pop(token, None)
             if pending is None or pending["expires_at"] < time.time():
                 raise APIError(409, "confirmation_expired", "确认请求不存在、已使用或已失效。")
@@ -488,16 +543,22 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
     def forget_memory(key: str, request: Request):
         rt = runtime_for(request)
         with rt.lock:
+            require_idle_chat(rt)
             try:
                 deleted = rt.memory_manager().forget(key)
+                with rt.store.connection:
+                    rt.store.connection.execute("UPDATE api_message_requests SET response_json=NULL")
             except ValueError:
                 raise APIError(422, "invalid_memory_key", "记忆槽位名称无效。") from None
-        return {"success": True, "deleted_versions": deleted, "blocked_key": key}
+        return {"success": True, "deleted_versions": deleted, "blocked_key": key,
+                "scope": "memory_slot_only",
+                "note": "仅删除指定长期记忆槽位；原始对话与独立个人理解仍保留。"}
 
     @app.post("/api/v1/memories/{key}/allow")
     def allow_memory(key: str, request: Request):
         rt = runtime_for(request)
         with rt.lock:
+            require_idle_chat(rt)
             try:
                 allowed = rt.memory_manager().allow(key)
             except ValueError:
@@ -538,32 +599,41 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
     def export_data(request: Request):
         rt = runtime_for(request)
         with rt.lock:
-            memories = rt.memory_manager().list_active()
-            manager = rt.understanding_manager()
-            claims = []
-            offset = 0
-            while True:
-                page = manager.list_claims(limit=200, offset=offset)
-                claims.extend(page)
-                if len(page) < 200:
-                    break
-                offset += 200
-            growth_rows = rt.growth.connection.execute(
-                "SELECT id, kind, goal_id, text, status, version, created_at, updated_at "
-                "FROM growth_items ORDER BY id"
-            ).fetchall()
-            growth = [dict(row) for row in growth_rows]
-            return {
-                "format_version": 1,
-                "conversations": rt.store.list_conversations(include_archived=True),
-                "turns": rt.store.all_turns(),
-                "long_memories": [_plain(item) for item in memories],
-                "personal_understanding": [
-                    {"claim": _plain(item), "history": manager.get_claim_history(item.id)}
-                    for item in claims
-                ],
-                "growth_items": growth,
-            }
+            require_idle_chat(rt)
+            worker = rt.background_worker
+            if worker is not None and not worker.pause(timeout=5.0):
+                worker.resume()
+                raise APIError(409, "background_busy", "后台整理仍在执行，请稍后重试导出。")
+            try:
+                memories = rt.memory_manager().list_active()
+                manager = rt.understanding_manager()
+                claims = []
+                offset = 0
+                while True:
+                    page = manager.list_claims(limit=200, offset=offset)
+                    claims.extend(page)
+                    if len(page) < 200:
+                        break
+                    offset += 200
+                growth_rows = rt.growth.connection.execute(
+                    "SELECT id, kind, goal_id, text, status, version, created_at, updated_at "
+                    "FROM growth_items ORDER BY id"
+                ).fetchall()
+                growth = [dict(row) for row in growth_rows]
+                return {
+                    "format_version": 1,
+                    "conversations": rt.store.list_conversations(include_archived=True),
+                    "turns": rt.store.all_turns(),
+                    "long_memories": [_plain(item) for item in memories],
+                    "personal_understanding": [
+                        {"claim": _plain(item), "history": manager.get_claim_history(item.id)}
+                        for item in claims
+                    ],
+                    "growth_items": growth,
+                }
+            finally:
+                if worker is not None:
+                    worker.resume()
 
     @app.post("/api/v1/data/clear")
     def preview_data_clear(request: Request):
@@ -586,6 +656,7 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
     def confirm_data_clear(payload: ConfirmationInput, request: Request):
         rt = runtime_for(request)
         with rt.lock:
+            require_idle_chat(rt)
             if payload.token not in rt.pending_data_clears:
                 raise APIError(409, "confirmation_expired", "清除确认请求不存在或已失效。")
             worker = rt.background_worker
@@ -596,11 +667,11 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
                     "后台整理仍在执行，请稍后重试清除操作。",
                 )
             try:
-                rt.pending_data_clears.remove(payload.token)
                 with rt.store.connection:
                     turn_count = rt.store.connection.execute(
                         "SELECT COUNT(*) FROM turns"
                     ).fetchone()[0]
+                    rt.store.connection.execute("DELETE FROM api_message_requests")
                     rt.store.connection.execute("DELETE FROM turns")
                     rt.store.connection.execute(
                         "DELETE FROM conversations WHERE id <> 'default'"
