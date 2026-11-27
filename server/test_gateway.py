@@ -1,38 +1,25 @@
+import json
 import os
-import tempfile
 import unittest
-from unittest.mock import patch
-from uuid import uuid4
+from unittest.mock import patch,MagicMock
 from fastapi.testclient import TestClient
 from server.app import app
 
 class GatewayTest(unittest.TestCase):
-    def setUp(self):
-        self.temp=tempfile.TemporaryDirectory()
-        self.env=patch.dict(os.environ,{"BECOMING_SERVER_DB":self.temp.name+"/server.db","BECOMING_TOKEN":"test-token","BECOMING_ACCOUNT":"test","BECOMING_DEMO":"1"})
-        self.env.start()
-        self.client=TestClient(app)
-        self.auth={"Authorization":"Bearer test-token"}
-    def tearDown(self):
-        self.client.close()
-        self.env.stop()
-        self.temp.cleanup()
-    def test_auth_and_usage(self):
-        data={"request_id":str(uuid4()),"messages":[{"role":"user","content":"hello"}]}
-        self.assertEqual(self.client.post("/v1/llm/complete",json=data).status_code,401)
-        self.assertEqual(self.client.post("/v1/llm/complete",json=data,headers=self.auth).status_code,200)
-        self.assertEqual(self.client.post("/v1/llm/complete",json=data,headers=self.auth).status_code,409)
-        records=self.client.get("/v1/usage",headers=self.auth).json()["records"]
-        self.assertEqual(len(records),1)
-        self.assertEqual(records[0]["cost_microunits"],0)
-    def test_sync_idempotency_and_isolation(self):
-        turn={"id":str(uuid4()),"user":"a","assistant":"b","created_at":"2026-01-01T00:00:00Z"}
-        data={"cursor":0,"turns":[turn]}
-        first=self.client.post("/v1/sync/turns",json=data,headers=self.auth).json()
-        second=self.client.post("/v1/sync/turns",json=data,headers=self.auth).json()
-        self.assertEqual(first,second)
-        self.assertEqual(len(first["turns"]),1)
-        bad={"cursor":0,"turns":[{**turn,"user":"changed"}]}
-        self.assertEqual(self.client.post("/v1/sync/turns",json=bad,headers=self.auth).status_code,409)
-        with patch.dict(os.environ,{"BECOMING_ACCOUNT":"other"}):
-            self.assertEqual(self.client.post("/v1/sync/turns",json={"cursor":0,"turns":[]},headers=self.auth).json()["turns"],[])
+    @patch.dict(os.environ,{"BECOMING_BASE_URL":"http://127.0.0.1:9999/v1","BECOMING_API_KEY":"test-only","BECOMING_MODEL":"test-model"})
+    @patch("server.app.build_opener")
+    def test_forward(self,opener):
+        response=MagicMock()
+        response.read.return_value=json.dumps({"choices":[{"message":{"content":"hello"}}],"usage":{"prompt_tokens":1}}).encode()
+        opener.return_value.open.return_value.__enter__.return_value=response
+        with TestClient(app) as client:
+            result=client.post("/v1/llm/complete",json={"messages":[{"role":"user","content":"hi"}]})
+        self.assertEqual(result.status_code,200)
+        self.assertEqual(result.json(),{"text":"hello","usage":{"prompt_tokens":1}})
+        req=opener.return_value.open.call_args.args[0]
+        self.assertEqual(req.full_url,"http://127.0.0.1:9999/v1/chat/completions")
+        self.assertEqual(json.loads(req.data),{"model":"test-model","messages":[{"role":"user","content":"hi"}]})
+    @patch.dict(os.environ,{"BECOMING_BASE_URL":"http://example.org/v1","BECOMING_API_KEY":"test","BECOMING_MODEL":"m"})
+    def test_insecure_provider_refused(self):
+        with TestClient(app) as client:
+            self.assertEqual(client.post("/v1/llm/complete",json={"messages":[{"role":"user","content":"hi"}]}).status_code,503)

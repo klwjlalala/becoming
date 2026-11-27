@@ -2,19 +2,18 @@ import {createServer} from 'node:http';
 import {readFileSync,mkdirSync} from 'node:fs';
 import {resolve,dirname} from 'node:path';
 import {Store} from './store.mjs';
-import {Agent,Gateway,SyncWorker} from './agent.mjs';
+import {Agent,Gateway,BackgroundWorker} from './agent.mjs';
+import {LongMemory} from './memory.mjs';
 const port=Number(process.env.BECOMING_LOCAL_PORT||4310);
 const host='127.0.0.1:'+port;
-const account=process.env.BECOMING_ACCOUNT||'dev';
-if(!/^[a-zA-Z0-9_-]{1,64}$/.test(account)) throw Error('Invalid account namespace');
-const path=resolve(process.env.BECOMING_LOCAL_DB||'data/local-'+account+'.sqlite3');
+const path=resolve(process.env.BECOMING_LOCAL_DB||'data/agent-local.sqlite3');
 mkdirSync(dirname(path),{recursive:true});
 const store=new Store(path);
-const gateway=new Gateway(process.env.BECOMING_GATEWAY||'http://127.0.0.1:8000',process.env.BECOMING_TOKEN,account);
-const agent=new Agent(store,gateway);
-const worker=new SyncWorker(store,gateway);
-const enabled=process.env.BECOMING_SYNC==='1';
-if(enabled){setInterval(()=>worker.tick(),5000).unref();void worker.tick();}
+const gateway=new Gateway(process.env.BECOMING_GATEWAY||'http://127.0.0.1:8000');
+const memory=process.env.BECOMING_ENABLE_LONG_MEMORY==='0'?null:new LongMemory(store,gateway);
+const agent=new Agent(store,gateway,{memory});
+const worker=new BackgroundWorker(store,{'long_memory.extract':id=>{if(!memory)throw Error('Memory disabled');return memory.extract(id);}});
+setInterval(()=>{void worker.tick();},1000).unref();
 const assets=new Map([['/',['text/html; charset=utf-8','index.html']],['/app.js',['text/javascript; charset=utf-8','app.js']],['/style.css',['text/css; charset=utf-8','style.css']]]);
 function json(res,status,body){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(body));}
 async function body(req){
@@ -30,7 +29,9 @@ createServer(async(req,res)=>{
     const [type,file]=assets.get(p);res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store'});return res.end(readFileSync(new URL('../web/'+file,import.meta.url)));
   }
   if(req.method==='GET'&&p==='/api/history')return json(res,200,{turns:store.history(200)});
-  if(req.method==='GET'&&p==='/api/status')return json(res,200,{syncEnabled:enabled,pending:store.pendingCount(),lastSuccess:worker.lastSuccess,lastError:worker.lastError});
+  if(req.method==='GET'&&p==='/api/status')return json(res,200,{jobs:store.jobs().reduce((a,j)=>(a[j.status]=(a[j.status]||0)+1,a),{}),memoryEnabled:!!memory});
+  if(req.method==='GET'&&p==='/api/memories')return json(res,200,{memories:memory?.list()||[]});
+  if(req.method==='GET'&&p==='/api/jobs')return json(res,200,{jobs:store.jobs()});
   if(req.method==='POST'&&p==='/api/chat'){
     if(req.headers.origin!=='http://'+host||!req.headers['content-type']?.startsWith('application/json'))return json(res,403,{error:'Invalid request origin'});
     let input;try{input=(await body(req)).text;if(typeof input!=='string'||!input.trim()||input.length>16000)throw Error();}

@@ -1,36 +1,26 @@
-# Local Agent Runtime — migration branch
+# Node agent migration — revised scope
 
-Baseline: 36e7c31b5dfb24b14906458302df356cf4767e6b. This branch replaces the Electron shell with a local Node.js service and browser test page. The existing Python agent and its tests are retained as a behavioral reference, not used by the new runtime.
+The main branch remains the reference implementation. The current development branch is intentionally local-first and single-user. Python is ONLY a stateless LLM forwarding service; no account, billing, server DB, sync, payments or new growth features in this phase. Never expose the unauthenticated development gateway to the public Internet.
 
-## Run the first vertical slice
+## Run (Python 3.11+, Node 22.13+)
 
-Python 3.11+, Node.js 22.13+ (built-in SQLite). In two terminals from the repository root:
+From repository root, terminal 1:
 
     python -m pip install -e .
-    export BECOMING_TOKEN=replace-with-a-long-random-development-token
-    export BECOMING_DEMO=1
+    export BECOMING_BASE_URL=https://api.openai.com/v1
+    export BECOMING_API_KEY=your-provider-key
+    export BECOMING_MODEL=your-model
     python -m uvicorn server.app:app --host 127.0.0.1 --port 8000
 
-    export BECOMING_TOKEN=replace-with-the-same-token
-    export BECOMING_SYNC=1
+Terminal 2:
+
     npm --prefix agent-runtime start
 
-Open http://127.0.0.1:4310 (not localhost). Sync is explicitly enabled by BECOMING_SYNC=1 because transcripts are personal data. Without it, local history still works. Demo mode is explicitly enabled; for real inference unset it and configure BECOMING_MODEL_BASE_URL, BECOMING_MODEL_API_KEY and BECOMING_MODEL on the Python server only. Use a separate development database for demo vs real conversations (BECOMING_LOCAL_DB, BECOMING_SERVER_DB). Account namespace BECOMING_ACCOUNT defaults to dev and must match both processes. Never share a local DB across accounts.
+Open http://127.0.0.1:4310. Configure the provider only in Python. The Node gateway adapter receives text; usage returned by the provider is passed through without storing or calculating fees. Local SQLite defaults to data/agent-local.sqlite3 (new database, not an in-place migration of the Python schema). Web remains a plain conversation page with background status.
 
-## Scope and decisions
+## Migration checkpoint
 
-- Node owns prompt construction, conversation history, reply lifecycle, SQLite and independent retrying sync worker. Current migration copies the original companion/exploration/guidance policies; no task/growth UI or additional business functions.
-- Python owns gateway authentication, upstream model credentials, measured token usage, optional configured cost (integer microunits per million input/output tokens), cloud SQLite and sync API. It is a single configured development account, not a production registration/session/payment system. Unknown usage is null, uncertain requests are marked uncertain; request IDs are not replayed automatically.
-- Append-only sync uses UUID identity, idempotent upload, per-account cursor, atomic local ack/pull and retries; cloud is not on the local persistence path. No automatic data upload unless enabled. Multi-device editing, deletion propagation, encryption, account switching, schema migration and production PostgreSQL are not implemented.
-- Web is intentionally a dependency-free same-origin debugging page rather than a Vue product UI, to keep the first verification path small. Runtime binds loopback and rejects other Host/Origin values. No public exposure without a production security design.
-- LLM is non-streaming in this slice. Existing long-memory extraction/revision/retrieval, dynamic personal understanding/evidence/confirmation, persistent post-turn jobs and business tool calling have NOT been ported. Do not treat this as parity with main. Migrate memory and personal understanding before product feature work, then replay existing functional/effect evaluation cases against Node.
-
-## Verification
-
-    npm --prefix agent-runtime test
-    python -m pip install httpx
-    python -m unittest server.test_gateway -v
-
-Real provider tests are opt-in and not part of default CI. No test result is asserted merely by adding tests.
-
-For a real HTTP integration smoke test with a temporary database and demo model: `python server/smoke_local.py`. The CI workflow executes this alongside the unit tests without any real model calls. Real LLM and conversational quality validation still require separate execution.
+- Ported: conversation history, companion/self-exploration/guidance system prompts, default lexical long-memory retrieval, optional V1 semantic selection, source-quote validation, credential guard, slot dedupe/revision, exact-slot forget/allow, idempotent receipts, atomic turn+job enqueue, finite background retries and startup recovery.
+- Not yet ported: dynamic personal understanding (full evidence/claim/version/revision/confirmation/batch policy), existing confirmed growth tools, multiple conversations, advanced historical/embedding retrieval variants, and complete regression parity. These are existing capabilities, not authorization to add new business functionality. No real-model quality pass is claimed.
+- This checkpoint uses single-process/single-conversation Node; previous prototype's sync code and server DB have been removed from the active runtime. Legacy Python packages/tests remain as behavioral references.
+- Tests: npm --prefix agent-runtime test; python -m pip install httpx; python -m unittest server.test_gateway -v; python server/smoke_local.py. HTTP smoke uses a local fake upstream provider, not paid inference.

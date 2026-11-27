@@ -1,4 +1,4 @@
-> **Local Agent Web migration branch**: Start with [new architecture and startup instructions](docs/local-agent-web.md). The historical Python agent documentation below is retained as a migration reference; Electron is no longer part of this branch.
+> **Node migration branch:** [Current scope and startup](docs/local-agent-web.md). Python is a stateless LLM gateway; Node owns the agent. The historical Python documentation below is a reference only.
 
 # Becoming
 
