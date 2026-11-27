@@ -46,6 +46,7 @@ jobs:
       - name: Run actual Electron under Xvfb with Chromium sandbox enabled
         working-directory: desktop
         run: |
+          npx --no-install install-electron
           sudo chown root:root node_modules/electron/dist/chrome-sandbox
           sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
           xvfb-run -a npm run test:electron
