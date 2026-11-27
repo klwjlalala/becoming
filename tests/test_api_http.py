@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class FakeModelHandler(BaseHTTPRequestHandler):
     blocked_source_text = None
+    chat_started = threading.Event()
+    chat_release = threading.Event()
     extraction_started = threading.Event()
     extraction_release = threading.Event()
 
@@ -96,6 +98,10 @@ class FakeModelHandler(BaseHTTPRequestHandler):
             )
         elif "你还记得我喜欢什么时候阅读吗" in user_text:
             reply = "你之前提到喜欢晚上阅读。"
+        elif user_text == "block foreground test":
+            self.chat_started.set()
+            self.chat_release.wait(10)
+            reply = "foreground done"
         elif "Connection test" in user_text:
             reply = "OK"
         else:
@@ -221,6 +227,46 @@ class APIHTTPTests(unittest.TestCase):
             body = exc.read()
         self.assertEqual(status, expected, body.decode("utf-8", errors="replace"))
         return json.loads(body.decode("utf-8")) if body else None
+
+    def test_foreground_model_io_does_not_block_reads_or_allow_destructive_writes(self):
+        conv = self.request("POST", "/conversations", {"title": "parallel read"}, 201)
+        path = f"/conversations/{conv['id']}/messages"
+        FakeModelHandler.chat_started.clear()
+        FakeModelHandler.chat_release.clear()
+        results, errors = [], []
+        def send():
+            try:
+                results.append(self.request("POST", path, {"content": "block foreground test"}))
+            except BaseException as exc:
+                errors.append(exc)
+        worker = threading.Thread(target=send, daemon=True)
+        worker.start()
+        try:
+            self.assertTrue(FakeModelHandler.chat_started.wait(3))
+            self.assertEqual(self.request("GET", path)["items"], [])
+            self.assertEqual(self.request("GET", "/health")["status"], "ok")
+            conflict = self.request("DELETE", f"/conversations/{conv['id']}", expected=409)
+            self.assertEqual(conflict["error"]["code"], "chat_busy")
+            conflict = self.request("POST", path, {"content": "second"}, 409)
+            self.assertEqual(conflict["error"]["code"], "chat_busy")
+            self.assertTrue(worker.is_alive())
+        finally:
+            FakeModelHandler.chat_release.set()
+            worker.join(6)
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(errors, errors)
+        self.assertEqual(results[0]["reply"], "foreground done")
+
+    def test_message_request_id_replay_and_conflict(self):
+        conv = self.request("POST", "/conversations", {"title": "retry"}, 201)
+        path = f"/conversations/{conv['id']}/messages"
+        payload = {"content": "retry test", "request_id": "retry-test-0001"}
+        first = self.request("POST", path, payload)
+        second = self.request("POST", path, payload)
+        self.assertEqual(first["message_id"], second["message_id"])
+        self.assertEqual(len(self.request("GET", path)["items"]), 1)
+        conflict = self.request("POST", path, {**payload, "content": "changed"}, 409)
+        self.assertEqual(conflict["error"]["code"], "request_id_conflict")
 
     def test_http_lifecycle_chat_growth_and_data_clear(self):
         health = self.request("GET", "/health")
