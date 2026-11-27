@@ -35,7 +35,9 @@ export function operations(service, models, confirmClear) {
     conversationUpdate: (value, input) => r('PATCH', conversation(value), object(input)),
     conversationDelete: value => r('DELETE', conversation(value)),
     messages: (value, input) => r('GET', conversation(value) + '/messages' + query(input, ['limit','before_id'])),
-    send: (value, content) => r('POST', conversation(value) + '/messages', { content }),
+    send: (value, content, requestId) => r('POST', conversation(value) + '/messages', {
+      content, ...(requestId === undefined ? {} : { request_id: requestId }),
+    }),
     confirmGrowth: (value, token) => r('POST', conversation(value) + '/confirm', { token }),
     cancelGrowth: value => r('POST', conversation(value) + '/cancel'),
     goals: input => r('GET', '/growth/goals' + query(input, ['offset'])),
