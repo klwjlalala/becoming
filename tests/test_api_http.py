@@ -268,6 +268,16 @@ class APIHTTPTests(unittest.TestCase):
         conflict = self.request("POST", path, {**payload, "content": "changed"}, 409)
         self.assertEqual(conflict["error"]["code"], "request_id_conflict")
 
+    def test_delete_default_conversation_removes_request_receipt(self):
+        path = "/conversations/default/messages"
+        payload = {"content": "retry test", "request_id": "default-test-0001"}
+        first = self.request("POST", path, payload)
+        self.wait_for_turn_jobs(first["message_id"])
+        self.request("DELETE", "/conversations/default")
+        self.assertEqual(self.request("GET", path)["items"], [])
+        self.request("POST", path, payload)
+        self.assertEqual(len(self.request("GET", path)["items"]), 1)
+
     def test_http_lifecycle_chat_growth_and_data_clear(self):
         health = self.request("GET", "/health")
         self.assertEqual(health["status"], "ok")
