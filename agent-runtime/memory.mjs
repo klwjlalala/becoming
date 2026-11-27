@@ -73,6 +73,8 @@ export class LongMemory{
     if(new Set(checked.map(c=>c.key)).size!==checked.length)throw Error('Duplicate keys');
     return this.store.transaction(()=>checked.map(c=>this.writeChecked(c,turnId)).filter(id=>id!==null));
   }
+  extractionPrompt(){return EXTRACT_PROMPT;}
+  validateRevision(_candidate){}
   async extract(turnId){
     if(this.receipt(turnId))return {written:[],rejected:0};
     const turn=this.store.turn(turnId);if(!turn)throw Error('Missing source');
@@ -80,7 +82,7 @@ export class LongMemory{
     if(user.length>8000||SECRET.test(user)){this.mark(turnId);return {written:[],rejected:0};}
     const q=terms(user),score=m=>overlap(q,new Set([...terms(m.key),...terms(m.quote)]));
     const hints=this.list().sort((a,b)=>score(b)-score(a)||b.id-a.id).slice(0,30).map(({id,key,category,quote})=>({id,key,category,quote}));
-    const raw=await this.model.complete([{role:'system',content:EXTRACT_PROMPT},{role:'user',content:JSON.stringify({current_user_message:user,existing_slots:hints,blocked_keys:this.blockedKeys().slice(0,100)})}]);
+    const raw=await this.model.complete([{role:'system',content:this.extractionPrompt()},{role:'user',content:JSON.stringify({current_user_message:user,existing_slots:hints,blocked_keys:this.blockedKeys().slice(0,100)})}]);
     const data=JSON.parse(raw);if(!Array.isArray(data)||data.length>12)throw Error('Invalid extraction batch');
     const parsed=[];let rejected=0;
     for(const item of data){try{parsed.push(parseCandidate(item,user));}catch{rejected++;}}
@@ -92,7 +94,7 @@ export class LongMemory{
       for(const c of parsed){
         if(counts.get(c.key)!==1){rejected++;continue;}
         this.db.exec('SAVEPOINT memory_item');
-        try{const id=this.writeChecked(c,turnId);if(id!==null)written.push(id);}
+        try{this.validateRevision(c);const id=this.writeChecked(c,turnId);if(id!==null)written.push(id);}
         catch(e){this.db.exec('ROLLBACK TO memory_item');if(e.message!=='Memory revision conflict')throw e;rejected++;}
         finally{this.db.exec('RELEASE memory_item');}
       }

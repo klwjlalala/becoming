@@ -4,6 +4,14 @@ export class Gateway{
     const u=new URL(url);if(u.username||u.password||u.search||u.hash||!(u.protocol==='https:'||(u.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(u.hostname))))throw Error('Gateway requires HTTPS or loopback HTTP');
     this.url=url.replace(/\/$/,'');
   }
+  async embed(texts){
+    const all=[];
+    for(let i=0;i<texts.length;i+=32){
+      const batch=texts.slice(i,i+32),res=await fetch(this.url+'/v1/llm/embeddings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({texts:batch}),redirect:'error',signal:AbortSignal.timeout(90000)});
+      if(!res.ok)throw Error('Embedding gateway HTTP '+res.status);
+      const {vectors}=await res.json();if(!Array.isArray(vectors)||vectors.length!==batch.length)throw Error('Invalid embedding count');all.push(...vectors);
+    }return all;
+  }
   async complete(messages){
     const res=await fetch(this.url+'/v1/llm/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages}),redirect:'error',signal:AbortSignal.timeout(90000)});
     if(!res.ok)throw Error('Gateway HTTP '+res.status);
@@ -40,7 +48,7 @@ export class Agent{
       if(this.memory&&EXPLICIT.test(text))answer=answer.trim()+'\n\n这条记忆已进入后台整理队列，当前尚未确认写入完成。';
       let turn;try{turn=this.store.append(text,answer.trim(),kinds,conversationId);}catch(e){this.growth?.cancel(conversationId);throw e;}
       let confirmed=[];if(this.understanding){try{confirmed=this.understanding.resolve(turn.id);}catch{errors.push('confirmation_failed');}}
-      return {...turn,pending_growth:this.growth?.getPending(conversationId)??null,event:{growth:growthEvent,retrieved_memory_ids:memories.map(m=>m.id),retrieved_claim_ids:claims.map(c=>c.id),confirmed_claim_ids:confirmed,queued_job_ids:this.store.jobs(turn.id).map(j=>j.id),errors}};
+      return {...turn,pending_growth:this.growth?.getPending(conversationId)??null,event:{growth:growthEvent,retrieved_memory_ids:memories.map(m=>m.id),retrieved_claim_ids:claims.map(c=>c.id),confirmed_claim_ids:confirmed,queued_job_ids:this.store.jobs(turn.id).map(j=>j.id),memory_search:this.memory?.lastSearch??null,understanding_search:this.understanding?.lastSearch??null,errors}};
     });
     this.tail=run.catch(()=>{});return run;
   }
