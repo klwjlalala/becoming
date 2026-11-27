@@ -4,6 +4,7 @@ import {resolve,dirname} from 'node:path';
 import {Store} from './store.mjs';
 import {Agent,Gateway,BackgroundWorker} from './agent.mjs';
 import {LongMemory} from './memory.mjs';
+import {PersonalUnderstanding} from './understanding.mjs';
 const port=Number(process.env.BECOMING_LOCAL_PORT||4310);
 const host='127.0.0.1:'+port;
 const path=resolve(process.env.BECOMING_LOCAL_DB||'data/agent-local.sqlite3');
@@ -11,8 +12,9 @@ mkdirSync(dirname(path),{recursive:true});
 const store=new Store(path);
 const gateway=new Gateway(process.env.BECOMING_GATEWAY||'http://127.0.0.1:8000');
 const memory=process.env.BECOMING_ENABLE_LONG_MEMORY==='0'?null:new LongMemory(store,gateway);
-const agent=new Agent(store,gateway,{memory});
-const worker=new BackgroundWorker(store,{'long_memory.extract':id=>{if(!memory)throw Error('Memory disabled');return memory.extract(id);}});
+const understanding=process.env.BECOMING_ENABLE_PERSONAL_UNDERSTANDING==='0'?null:new PersonalUnderstanding(store,gateway);
+const agent=new Agent(store,gateway,{memory,understanding});
+const worker=new BackgroundWorker(store,{'long_memory.extract':id=>{if(!memory)throw Error('Memory disabled');return memory.extract(id);},'personal_understanding.process':id=>{if(!understanding)throw Error('Understanding disabled');return understanding.processTurn(id);}});
 setInterval(()=>{void worker.tick();},1000).unref();
 const assets=new Map([['/',['text/html; charset=utf-8','index.html']],['/app.js',['text/javascript; charset=utf-8','app.js']],['/style.css',['text/css; charset=utf-8','style.css']]]);
 function json(res,status,body){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(body));}
@@ -31,6 +33,7 @@ createServer(async(req,res)=>{
   if(req.method==='GET'&&p==='/api/history')return json(res,200,{turns:store.history(200)});
   if(req.method==='GET'&&p==='/api/status')return json(res,200,{jobs:store.jobs().reduce((a,j)=>(a[j.status]=(a[j.status]||0)+1,a),{}),memoryEnabled:!!memory});
   if(req.method==='GET'&&p==='/api/memories')return json(res,200,{memories:memory?.list()||[]});
+  if(req.method==='GET'&&p==='/api/understanding')return json(res,200,{claims:understanding?.list()||[]});
   if(req.method==='GET'&&p==='/api/jobs')return json(res,200,{jobs:store.jobs()});
   if(req.method==='POST'&&p==='/api/chat'){
     if(req.headers.origin!=='http://'+host||!req.headers['content-type']?.startsWith('application/json'))return json(res,403,{error:'Invalid request origin'});

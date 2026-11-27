@@ -27,7 +27,8 @@ export class Agent{
       const kinds=[];if(this.memory)kinds.push('long_memory.extract');if(this.understanding)kinds.push('personal_understanding.process');
       if(this.memory&&EXPLICIT.test(text))answer=answer.trim()+'\n\n这条记忆已进入后台整理队列，当前尚未确认写入完成。';
       const turn=this.store.append(text,answer.trim(),kinds);
-      return {...turn,event:{retrieved_memory_ids:memories.map(m=>m.id),retrieved_claim_ids:claims.map(c=>c.id),queued_job_ids:this.store.jobs(turn.id).map(j=>j.id),errors}};
+      let confirmed=[];if(this.understanding){try{confirmed=this.understanding.resolve(turn.id);}catch{errors.push('confirmation_failed');}}
+      return {...turn,event:{retrieved_memory_ids:memories.map(m=>m.id),retrieved_claim_ids:claims.map(c=>c.id),confirmed_claim_ids:confirmed,queued_job_ids:this.store.jobs(turn.id).map(j=>j.id),errors}};
     });
     this.tail=run.catch(()=>{});return run;
   }

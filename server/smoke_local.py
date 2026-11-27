@@ -21,6 +21,8 @@ class Provider(BaseHTTPRequestHandler):
         if "你是记忆提取器" in system:
             user=json.loads(payload["messages"][1]["content"])["current_user_message"]
             text=json.dumps([{"key":"职业","category":"fact","quote":user,"replaces":None}],ensure_ascii=False)
+        if "你是个人理解更新引擎" in system:
+            text=json.dumps({"evidence":[],"operations":[],"confirmation":None})
         body=json.dumps({"choices":[{"message":{"content":text}}]}).encode()
         self.send_response(200);self.send_header("Content-Type","application/json");self.end_headers();self.wfile.write(body)
 def port():
