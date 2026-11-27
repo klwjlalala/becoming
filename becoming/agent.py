@@ -58,6 +58,8 @@ class Agent:
             except (ModelError, sqlite3.Error, ValueError):
                 understanding_errors.append("retrieve_failed")
         system = SYSTEM_PROMPT
+        if defer_post_turn:
+            system += "\n长期记忆和个人理解在回复后异步整理，不要宣称尚未完成的记忆写入已经成功。"
         if memories:
             system += "\n" + self.long_memory.context(memories)
         if claims:
@@ -80,6 +82,8 @@ class Agent:
             if self.personal_understanding is not None:
                 priority = 10 if PersonalUnderstanding.is_urgent(text) else 0
                 job_specs.append(("personal_understanding.process", priority))
+        if defer_post_turn and self.long_memory is not None and _is_explicit_memory_update(text):
+            reply += "\n\n这条记忆已进入后台整理队列，当前尚未确认写入完成。"
         if defer_post_turn:
             turn_id = self.store.append_turn(
                 text, reply, background_jobs=tuple(job_specs)
@@ -127,12 +131,6 @@ class Agent:
                     understanding_errors.extend(event.errors)
                 except (ModelError, sqlite3.Error, ValueError):
                     understanding_errors.append("update_failed")
-        if defer_post_turn and self.long_memory is not None and _is_explicit_memory_update(text):
-            reply += "\n\n这条记忆已进入后台整理队列，当前尚未确认写入完成。"
-            try:
-                self.store.update_assistant(turn_id, reply)
-            except (AttributeError, sqlite3.Error):
-                errors.append("transcript_update_failed")
         if self.long_memory is not None and not defer_post_turn and "extract_failed" in errors and _is_explicit_memory_update(text):
             reply += "\n\n不过，这次长期记忆没有成功保存或更新；我不想让你误以为已经记住。"
             try:
