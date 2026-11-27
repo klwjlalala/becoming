@@ -351,7 +351,9 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
                     result = rt.store.delete_conversation(conversation_id)
                 except ValueError:
                     raise APIError(404, "conversation_not_found", "对话不存在。") from None
-                rt.agents.pop(conversation_id, None)
+                # Proposals in other sessions may have been derived from the
+                # deleted session's shared memory.
+                rt.agents.clear()
             finally:
                 if worker is not None:
                     worker.resume()
@@ -378,7 +380,6 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
         with rt.lock:
             require_conversation(rt, conversation_id)
             require_idle_chat(rt)
-            agent = get_agent(rt, conversation_id)
             request_id = payload.request_id
             db = rt.store.connection
             if not payload.content.strip():
@@ -398,13 +399,22 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
                     if existing[1] is None:
                         raise APIError(409, "request_outcome_unknown", "此前请求结果未确认，请先刷新历史记录。")
                     result = json.loads(existing[1])
-                    pending = agent.adapter.pending
+                    active_agent = rt.agents.get(conversation_id)
+                    pending = active_agent.adapter.pending if active_agent is not None else None
                     confirmation = result.get("confirmation")
-                    if confirmation and (pending is None or pending[0] != confirmation["token"]):
-                        result["confirmation"] = None
-                        result["confirmation_required"] = False
-                        result["confirmation_expired"] = True
+                    token_hash = result.pop("_confirmation_token_hash", None)
+                    if confirmation:
+                        if (pending is not None and token_hash and secrets.compare_digest(
+                            hashlib.sha256(pending[0].encode("utf-8")).hexdigest(), token_hash
+                        )):
+                            confirmation["token"] = pending[0]
+                        else:
+                            result["confirmation"] = None
+                            result["confirmation_required"] = False
+                            result["confirmation_expired"] = True
                     return result
+            agent = get_agent(rt, conversation_id)
+            if request_id is not None:
                 with db:
                     db.execute(
                         "INSERT INTO api_message_requests(conversation_id,request_id,content_hash) VALUES(?,?,?)",
@@ -446,10 +456,16 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
                 "understanding_event": _plain(agent.last_understanding_event),
             }
             if request_id is not None:
+                receipt = dict(result)
+                if confirmation is not None:
+                    receipt["confirmation"] = {"preview": confirmation["preview"]}
+                    receipt["_confirmation_token_hash"] = hashlib.sha256(
+                        confirmation["token"].encode("utf-8")
+                    ).hexdigest()
                 with db:
                     db.execute(
                         "UPDATE api_message_requests SET response_json=? WHERE conversation_id=? AND request_id=?",
-                        (json.dumps(result, ensure_ascii=False), conversation_id, request_id),
+                        (json.dumps(receipt, ensure_ascii=False), conversation_id, request_id),
                     )
             return result
 
@@ -687,9 +703,9 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
                     }
                     if "blocked_memory_keys" in tables:
                         rt.store.connection.execute("DELETE FROM blocked_memory_keys")
-                growth_counts = rt.growth.clear()
                 rt.agents.clear()
                 rt.pending_growth_changes.clear()
+                growth_counts = rt.growth.clear()
                 rt.pending_data_clears.clear()
             finally:
                 if worker is not None:
