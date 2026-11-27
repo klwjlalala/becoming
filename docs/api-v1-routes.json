@@ -1,0 +1,118 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/v1/health"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/capabilities"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/background/status"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/background/jobs"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/model/config"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/model/config"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/model/test"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/conversations"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/conversations"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/conversations/{conversation_id}"
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/v1/conversations/{conversation_id}"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/conversations/{conversation_id}"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/conversations/{conversation_id}/messages"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/conversations/{conversation_id}/messages"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/conversations/{conversation_id}/confirm"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/conversations/{conversation_id}/cancel"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/growth/goals"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/growth/goals/{goal_id}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/growth/changes"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/growth/changes/{token}/confirm"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/growth/changes/{token}/cancel"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/memories"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/memories/{key}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/memories/{key}/allow"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/understanding/claims"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/understanding/claims/{claim_id}"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/data/export"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/data/clear"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/data/clear/confirm"
+  }
+]

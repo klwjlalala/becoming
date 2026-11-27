@@ -75,6 +75,7 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
     )
     app.state.runtime = runtime or AppRuntime.from_env()
     app.state.owns_runtime = runtime is None
+    service_token = os.environ.get("BECOMING_SERVICE_TOKEN", "")
 
     @app.on_event("startup")
     def start_background_worker():
@@ -100,7 +101,19 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
             content_length = int(request.headers.get("content-length", "0"))
         except ValueError:
             content_length = 0
-        if content_length > 65536:
+        if service_token and not secrets.compare_digest(
+            request.headers.get("Authorization", "").encode("utf-8"),
+            ("Bearer " + service_token).encode("utf-8"),
+        ):
+            response = JSONResponse(
+                status_code=401,
+                content={"error": {
+                    "code": "service_unauthorized",
+                    "message": "本地服务凭据无效。",
+                    "request_id": request_id,
+                }},
+            )
+        elif content_length > 65536:
             response = JSONResponse(
                 status_code=413,
                 content={"error": {
