@@ -30,3 +30,15 @@ test('background durable jobs and source deletion cascade',async()=>{
  const t=store.append('我喜欢阅读','好的',['personal_understanding.process']);await u.processTurn(t.id);await u.processTurn(t.id);assert.equal(u.list().length,1);
  store.db.prepare('DELETE FROM turns WHERE id=?').run(t.id);assert.equal(u.list().length,0);store.close();
 });
+
+test('invalid supersede relation leaves prior version intact and next attempt gets corrective feedback',async()=>{
+ const s=new Store(':memory:');let calls=0,raw,sys;
+ const model={complete:async msgs=>{calls++;sys=msgs[0].content;return raw;}},u=new PersonalUnderstanding(s,model);
+ const first=s.append('我重视创业','好的');raw=JSON.stringify(proposal(first.user));await u.processTurn(first.id);
+ const c=u.list()[0],oldId=u.history(c.id)[0].evidence[0].id;
+ const next=s.append('更正一下：我真正重视的是选择权','好的');
+ const p=proposal(next.user,{evidence:[{ref:'e1',turn_index:0,quote:next.user,kind:'correction',event_time:null}],operations:[op({operation:'SUPERSEDE',claim_ref:null,claim_id:c.id,expected_version:1,content:'用户重视选择权',prior_evidence:[{evidence_id:oldId,relation:'counter'}]})]});
+ raw=JSON.stringify(p);await assert.rejects(u.processTurn(next.id),/Missing support/);assert.equal(u.current(c.id).version,1);assert.equal(u.history(c.id).length,1);
+ p.operations[0].prior_evidence=[];raw=JSON.stringify(p);await u.processTurn(next.id);
+ assert.ok(sys.includes('上次支持/反证关系不合法'));assert.equal(calls,3);assert.equal(u.current(c.id).version,2);assert.equal(u.history(c.id)[0].evidence[0].id,oldId);assert.equal(u.history(c.id)[1].evidence.length,1);s.close();
+});

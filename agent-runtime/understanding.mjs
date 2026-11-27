@@ -141,16 +141,20 @@ export class PersonalUnderstanding{
   const t=this.store.turn(turnId);check(t,'Missing source');this.db.prepare("INSERT OR IGNORE INTO understanding_jobs(job_key,source_turn_id,kind,status,created_at,updated_at) VALUES(?,?,?,'pending',?,?)").run('turn:'+turnId,turnId,isUrgent(t.user)?'immediate':'normal',now(),now());
  }
  async processPending(targetId=null){
-  const jobs=this.db.prepare("SELECT j.id AS job_id,t.id AS turn_id,t.user AS user_text,t.assistant AS assistant_text,t.created_at AS recorded_at FROM understanding_jobs j JOIN turns t ON t.id=j.source_turn_id WHERE j.status IN ('pending','failed') AND j.attempts<3 ORDER BY CASE WHEN j.source_turn_id=? THEN -1 WHEN j.kind='immediate' THEN 0 ELSE 1 END,j.id LIMIT 5").all(targetId);
+  const jobs=this.db.prepare("SELECT j.id AS job_id,j.attempts AS attempts,j.last_error AS last_error,t.id AS turn_id,t.user AS user_text,t.assistant AS assistant_text,t.created_at AS recorded_at FROM understanding_jobs j JOIN turns t ON t.id=j.source_turn_id WHERE j.status IN ('pending','failed') AND j.attempts<3 ORDER BY CASE WHEN j.source_turn_id=? THEN -1 WHEN j.kind='immediate' THEN 0 ELSE 1 END,j.id LIMIT 5").all(targetId);
   if(!jobs.length)return [];
   const q=terms(jobs.map(t=>t.user_text).join('\n')),claims=this.list().sort((a,b)=>this.overlap(q,b,3)-this.overlap(q,a,3)||b.updated_at.localeCompare(a.updated_at)).slice(0,15),prior=new Map(claims.map(c=>[c.id,new Set(this.evidence(c.version_id,4).map(e=>e.id))]));
   const payload={turns:jobs.map((t,i)=>({turn_index:i,source_turn_id:t.turn_id,user_text:t.user_text,assistant_text:t.assistant_text,recorded_at:t.recorded_at})),current_claims:claims.map(c=>this.payload(c,true)),rules:{max_turns:5,no_write_is_valid:true,source_of_evidence:'user_text_only'}};
   this.store.transaction(()=>{for(const j of jobs)this.db.prepare("UPDATE understanding_jobs SET status='running',attempts=attempts+1,updated_at=? WHERE id=?").run(now(),j.job_id);});
+  let failure='update_failed';
   try{
-   const raw=await this.model.complete([{role:'system',content:UPDATE_PROMPT},{role:'user',content:JSON.stringify(payload)}]),proposal=parseProposal(raw,jobs,claims,prior);
+   const revisionRules='\n修订说明：SUPERSEDE 表示新版本替代旧认识。已被用户纠正的旧陈述保留在旧版本中，不需要重挂。REFINE/SUPERSEDE 的 prior_evidence 只允许 support 或 qualifies；旧证据不支持新命题时直接省略（prior_evidence: []）。例如旧认识“创业是目标”被纠正为“选择权是目标”，只挂本轮真实纠正原话作为 support，旧创业证据不要标 counter 重挂到新版本。CREATE、REINFORCE 同样不得包含 counter。无法解释的真实冲突应使用 DISPUTE。';
+   const retry=jobs.some(j=>j.attempts>0)?'\n本批之前未通过程序校验。请重新生成完整提案，重点检查 evidence 原话、引用 ID、当前版本、操作与关系限制。'+(jobs.some(j=>j.last_error==='invalid_support_relation')?' 上次支持/反证关系不合法：CREATE/REFINE/SUPERSEDE/REINFORCE 不得包含 counter；不要把已被替代的旧证据挂到新版本。':''):'';
+   const raw=await this.model.complete([{role:'system',content:UPDATE_PROMPT+revisionRules+retry},{role:'user',content:JSON.stringify(payload)}]);
+   let proposal;try{proposal=parseProposal(raw,jobs,claims,prior);}catch(e){failure=e.message==='Missing support'?'invalid_support_relation':'invalid_proposal';throw e;}
    const written=this.store.transaction(()=>{for(const j of jobs)check(this.store.turn(j.turn_id),'Source removed');const ids=this.apply(proposal,jobs);for(const j of jobs)this.db.prepare("UPDATE understanding_jobs SET status='done',last_error=NULL,updated_at=? WHERE id=?").run(now(),j.job_id);return ids;});
    return written;
-  }catch(e){this.store.transaction(()=>{for(const j of jobs)this.db.prepare("UPDATE understanding_jobs SET status='failed',last_error='update_failed',updated_at=? WHERE id=?").run(now(),j.job_id);});throw e;}
+  }catch(e){this.store.transaction(()=>{for(const j of jobs)this.db.prepare("UPDATE understanding_jobs SET status='failed',last_error=?,updated_at=? WHERE id=?").run(failure,now(),j.job_id);});throw e;}
  }
  async processTurn(id){
   // Register already queued turns before choosing a batch. All source turns

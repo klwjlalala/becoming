@@ -84,3 +84,14 @@ test('legacy snapshot field names are not part of tool contract; history preview
  assert.equal((await a.reply('更新行动')).event.growth.status,'rejected');assert.equal(g.item(child.id).status,'done');
  g.close();s.close();
 });
+
+test('explicit named read never substitutes stale history; one bounded retry gets real result',async()=>{
+ const s=new Store(':memory:'),g=new GrowthStore(':memory:'),goal=g.apply(g.prepare('create_goal',{text:'当前真实目标'})).record;
+ let calls=0;const model={complete:async m=>{calls++;if(m.at(-1).content.includes('本地工具真实结果'))return '已读取当前目标';if(m.at(-1).content.includes('本地执行器尚未收到'))return call('get_goal',{goal_id:goal.id});return '这是旧的历史目标';}};
+ const a=new Agent(s,model,{growth:new GrowthTools(model,g)});
+ const t=await a.reply('明确调用 get_goal，goal_id='+goal.id+'。');
+ assert.equal(calls,3);assert.equal(t.event.growth.status,'read');assert.equal(t.event.growth.result.goal.text,'当前真实目标');
+ calls=0;model.complete=async()=>{calls++;return '旧目标';};const failed=await a.reply('请调用 get_goal，goal_id=1');assert.equal(calls,2);assert.equal(failed.event.growth.status,'rejected');
+ model.complete=async()=>call('delete_item',{id:goal.id});const wrong=await a.reply('明确调用 get_goal，goal_id=1');assert.equal(wrong.event.growth.status,'rejected');assert.equal(wrong.pending_growth,null);assert.ok(g.item(goal.id));
+ calls=0;model.complete=async()=>{calls++;return '自然交流';};assert.equal((await a.reply('我们聊聊 get_goal 的作用')).assistant,'自然交流');assert.equal(calls,1);g.close();s.close();
+});

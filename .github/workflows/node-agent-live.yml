@@ -18,7 +18,7 @@ jobs:
   live:
     if: >-
       github.ref == 'refs/heads/feat/local-agent-web' &&
-      (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'fix: project legacy previews onto strict tool arguments')
+      (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'fix: enforce explicit tool invocation and guide understanding retries')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
