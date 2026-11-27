@@ -8,19 +8,19 @@ const out=process.env.BECOMING_REPORT||'artifacts/node-live-functional.json';
 async function scenario(name,options,run){const rt=runtime(model,options),item={name,status:'failed'},start=model.trace.length;report.cases.push(item);try{await run(rt,item);item.status='passed';}catch(e){item.error=e.message;item.diagnostics=model.trace.slice(start);console.log('Synthetic diagnostics: '+JSON.stringify(item.diagnostics));process.exitCode=1;}finally{rt.close();console.log(name+': '+item.status+(item.error?' — '+item.error:''));}}
 await scenario('explicit memory extract, recall, revision and forget',{memory:true,semantic:true},async(r,item)=>{
  const marker='BE-'+randomUUID().slice(0,8),next=marker+'-NEW';
- await r.reply('请将这条虚构信息保存为长期事实记忆，key 使用 test_code：我的测试代号是 '+marker+'。');
+ await r.reply('请记住我的长期事实信息，key 使用 test_code：我的代号是 '+marker+'。');
  const old=r.m.list().find(m=>m.quote.includes(marker));assert.ok(old,'Memory not persisted');
- const recall=await r.reply('请检索长期记忆，我的测试代号是什么？只回复代号。');
+ const recall=await r.reply('请检索长期记忆，我的代号是什么？只回复代号。');
  assert.ok(recall.assistant.includes(marker));assert.ok(recall.event.retrieved_memory_ids.includes(old.id));
- await r.reply('请更新长期记忆槽位 '+old.key+'，替换旧代号：我的测试代号是 '+next+'。');
+ await r.reply('请更新长期记忆槽位 '+old.key+'，替换旧代号：我的代号是 '+next+'。');
  const updated=r.m.list().find(m=>m.key===old.key);assert.ok(updated?.quote.includes(next));assert.notEqual(updated.id,old.id);
- assert.ok(r.m.forget(old.key)>=2);assert.ok(!r.m.list().some(m=>m.key===old.key));
+ assert.ok(r.m.forget(old.key)>=2);assert.ok(!r.m.list().some(m=>m.key===old.key));assert.ok(r.m.blockedKeys().includes(old.key));
  item.records={old,updated,recall:recall.event};
 });
 await scenario('all seven existing growth tools',{growth:true,historyTurns:12},async(r,item)=>{
  const events=[];item.events=events;
  async function mutate(tool,prompt){const t=await r.reply(prompt);events.push(t.event.growth);assert.equal(t.event.growth?.tool,tool);assert.equal(t.event.growth?.status,'proposed');assert.ok(t.pending_growth);const done=await r.reply('/confirm '+t.pending_growth.token);assert.equal(done.event.growth?.status,'committed');events.push(done.event.growth);return done.event.growth.result;}
- const goal=(await mutate('create_goal','明确调用 create_goal，text 为虚构目标：读书。')).record;
+ const goal=(await mutate('create_goal','明确调用 create_goal，text=读书。')).record;
  const action=(await mutate('create_action','明确调用 create_action，goal_id='+goal.id+'，text=读一页。')).record;
  const reflection=(await mutate('record_reflection','明确调用 record_reflection，goal_id='+goal.id+'，text=感觉平静。')).record;
  const updated=await mutate('update_item','明确调用 update_item，id='+action.id+'，status=done。');assert.equal(updated.record.status,'done');
@@ -28,9 +28,9 @@ await scenario('all seven existing growth tools',{growth:true,historyTurns:12},a
  await mutate('delete_item','明确调用 delete_item，id='+reflection.id+'。');assert.equal(r.g.read('get_goal',{goal_id:goal.id}).items.length,1);
 });
 await scenario('explicit understanding formation and correction',{understanding:true},async(r,item)=>{
- await r.reply('请更新你对我的理解：我目前把创业视为自己最重要的人生目标。这是虚构测试设定。');
- const first=r.u.list();assert.ok(first.length,'No claims created');
- await r.reply('更正一下：创业并不是我的人生目标；我真正希望的是有选择权，创业只是一个可选方式。这仍然只是虚构测试设定。');
+ await r.reply('请更新你对我的理解：我目前把创业视为自己最重要的人生目标。');
+ const first=r.u.list();assert.ok(first.length,'No claims created');item.first_claims=first;
+ await r.reply('更正一下：创业并不是我的人生目标；我真正希望的是有选择权，创业只是一个可选方式。');
  item.histories=first.map(c=>r.u.history(c.id));assert.ok(item.histories.some(h=>h.length>=2),'Existing claim was not revised');
  const answer=await r.reply('结合之前聊过的内容，我真正想要什么样的生活？');item.answer=answer;assert.ok(answer.event.retrieved_claim_ids.length);
  for(const c of r.u.list()){const current=r.u.history(c.id).find(v=>v.version===c.version);assert.ok(current.evidence.length);for(const e of current.evidence)assert.ok(r.store.turn(e.source_turn_id).user.includes(e.quote));}
