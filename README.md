@@ -1,3 +1,5 @@
+> **Local Agent Web migration branch**: Start with [new architecture and startup instructions](docs/local-agent-web.md). The historical Python agent documentation below is retained as a migration reference; Electron is no longer part of this branch.
+
 # Becoming
 
 一个帮助用户认识自己、探索人生意义、成为自己想成为的人的 AI 伙伴。

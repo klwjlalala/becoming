@@ -4,4 +4,4 @@ function add(role,text){const el=document.createElement('article');el.className=
 async function refresh(){const {turns}=await api('/api/history');$('history').replaceChildren();for(const t of turns){add('user',t.user);add('assistant',t.assistant);}}
 async function status(){try{const s=await api('/api/status');$('status').textContent=s.syncEnabled?'本地优先 · 待同步 '+s.pending+(s.lastError?' · 同步暂不可用':s.lastSuccess?' · 已连接':''):'本地优先 · 云同步未启用';}catch{$('status').textContent='运行时不可用';}}
 $('chat').addEventListener('submit',async e=>{e.preventDefault();const text=$('message').value.trim();if(!text)return;$('send').disabled=true;$('error').textContent='';try{await api('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});$('message').value='';await refresh();}catch(e){$('error').textContent=e.message;}finally{$('send').disabled=false;void status();}});
-refresh().catch(e=>$('error').textContent=e.message);void status();setInterval(status,5000);
+refresh().catch(e=>$('error').textContent=e.message);void status();setInterval(()=>{void status();if(!$('send').disabled)refresh().catch(()=>{});},5000);

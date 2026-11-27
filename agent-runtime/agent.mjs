@@ -16,14 +16,14 @@ export class Agent {
   }
 }
 export class Gateway {
-  constructor(url, token) {
+  constructor(url, token, account='dev') {
     const parsed=new URL(url);
     if(parsed.username||parsed.password||parsed.search||parsed.hash||!(parsed.protocol==='https:'||(parsed.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(parsed.hostname)))) throw Error('Gateway requires HTTPS or loopback HTTP');
     if(!token) throw Error('BECOMING_TOKEN required');
-    this.url=url.replace(/\/$/,'');this.token=token;
+    this.url=url.replace(/\/$/,'');this.token=token;this.account=account;
   }
   async post(path,body){
-    const res=await fetch(this.url+path,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+this.token},body:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(90000)});
+    const res=await fetch(this.url+path,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+this.token,'X-Becoming-Account':this.account},body:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(90000)});
     if(!res.ok) throw Error('Gateway HTTP '+res.status);
     return res.json();
   }

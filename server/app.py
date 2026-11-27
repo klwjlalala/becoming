@@ -36,11 +36,14 @@ def transaction():
         with con:
             yield con
 
-def account(authorization: str = Header(default="")):
+def account(authorization: str = Header(default=""), x_becoming_account: str | None = Header(default=None)):
     token = os.environ.get("BECOMING_TOKEN", "")
     if not token or not hmac.compare_digest(authorization.encode(), ("Bearer "+token).encode()):
         raise HTTPException(401, "Unauthorized")
-    return os.environ.get("BECOMING_ACCOUNT", "dev")
+    user = os.environ.get("BECOMING_ACCOUNT", "dev")
+    if x_becoming_account is not None and x_becoming_account != user:
+        raise HTTPException(403, "Account namespace mismatch")
+    return user
 
 class Message(BaseModel):
     role: Literal["system", "user", "assistant"]

@@ -32,3 +32,5 @@ Open http://127.0.0.1:4310 (not localhost). Sync is explicitly enabled by BECOMI
     python -m unittest server.test_gateway -v
 
 Real provider tests are opt-in and not part of default CI. No test result is asserted merely by adding tests.
+
+For a real HTTP integration smoke test with a temporary database and demo model: `python server/smoke_local.py`. The CI workflow executes this alongside the unit tests without any real model calls. Real LLM and conversational quality validation still require separate execution.

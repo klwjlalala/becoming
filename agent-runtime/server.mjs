@@ -10,7 +10,7 @@ if(!/^[a-zA-Z0-9_-]{1,64}$/.test(account)) throw Error('Invalid account namespac
 const path=resolve(process.env.BECOMING_LOCAL_DB||'data/local-'+account+'.sqlite3');
 mkdirSync(dirname(path),{recursive:true});
 const store=new Store(path);
-const gateway=new Gateway(process.env.BECOMING_GATEWAY||'http://127.0.0.1:8000',process.env.BECOMING_TOKEN);
+const gateway=new Gateway(process.env.BECOMING_GATEWAY||'http://127.0.0.1:8000',process.env.BECOMING_TOKEN,account);
 const agent=new Agent(store,gateway);
 const worker=new SyncWorker(store,gateway);
 const enabled=process.env.BECOMING_SYNC==='1';
@@ -30,7 +30,7 @@ createServer(async(req,res)=>{
     const [type,file]=assets.get(p);res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store'});return res.end(readFileSync(new URL('../web/'+file,import.meta.url)));
   }
   if(req.method==='GET'&&p==='/api/history')return json(res,200,{turns:store.history(200)});
-  if(req.method==='GET'&&p==='/api/status')return json(res,200,{syncEnabled:enabled,pending:store.pending().length,lastSuccess:worker.lastSuccess,lastError:worker.lastError});
+  if(req.method==='GET'&&p==='/api/status')return json(res,200,{syncEnabled:enabled,pending:store.pendingCount(),lastSuccess:worker.lastSuccess,lastError:worker.lastError});
   if(req.method==='POST'&&p==='/api/chat'){
     if(req.headers.origin!=='http://'+host||!req.headers['content-type']?.startsWith('application/json'))return json(res,403,{error:'Invalid request origin'});
     let input;try{input=(await body(req)).text;if(typeof input!=='string'||!input.trim()||input.length>16000)throw Error();}

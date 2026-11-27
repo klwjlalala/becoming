@@ -24,6 +24,7 @@ export class Store {
   pending() {
     return this.db.prepare('SELECT id,user,assistant,created_at FROM turns WHERE synced=0 ORDER BY created_at,id LIMIT 100').all();
   }
+  pendingCount(){return this.db.prepare('SELECT COUNT(*) AS count FROM turns WHERE synced=0').get().count;}
   cursor(){return this.db.prepare('SELECT cursor FROM sync_state WHERE id=1').get().cursor;}
   applySync(ack, turns, cursor) {
     if(!Number.isSafeInteger(cursor)||cursor<this.cursor()) throw Error('Invalid sync cursor');

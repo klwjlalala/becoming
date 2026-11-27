@@ -1,0 +1,21 @@
+name: Local agent web tests
+on:
+  push:
+    branches: [feat/local-agent-web]
+  workflow_dispatch:
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -e . httpx
+      - run: npm --prefix agent-runtime test
+      - run: python -m unittest server.test_gateway -v
+      - run: python server/smoke_local.py
