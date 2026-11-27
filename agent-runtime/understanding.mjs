@@ -13,7 +13,7 @@ const now=()=>new Date().toISOString();
 const check=(ok,reason)=>{if(!ok)throw Error(reason);};
 export function isUrgent(s){return has(s,URGENT_CUES)||(has(s,CORRECTION_CUES)&&has(s,PERSONAL_CORRECTION_CUES));}
 // Strict JSON reader rejects duplicate keys rather than accepting last-wins semantics.
-function parseJSON(raw){
+export function parseStrictJSON(raw){
   check(typeof raw==='string'&&raw.length<=40000,'Invalid proposal size');
   let s=raw.trim().replace(/^\x60{3}(?:json)?\s*|\s*\x60{3}$/gi,''),i=0;
   const ws=()=>{while(/\s/.test(s[i]||'')&&i<s.length)i++;};
@@ -26,7 +26,7 @@ function parseJSON(raw){
   };const result=value();ws();check(i===s.length,'Trailing JSON');return result;
 }
 export function parseProposal(raw,turns,claims,priorByClaim=new Map()){
- const d=parseJSON(raw);check(keys(d,['evidence','operations'],['confirmation']),'Invalid envelope');
+ const d=parseStrictJSON(raw);check(keys(d,['evidence','operations'],['confirmation']),'Invalid envelope');
  check(Array.isArray(d.evidence)&&d.evidence.length<=24&&Array.isArray(d.operations)&&d.operations.length<=12,'Invalid batch');
  const evidence=new Map(),existing=new Map(claims.map(c=>[c.id,c])),targets=new Set(),aliases=new Set();
  for(const e of d.evidence){
@@ -166,9 +166,9 @@ export class PersonalUnderstanding{
   const t=this.store.turn(turnId);if(!t)return [];
   return this.store.transaction(()=>{
    const currentRow=this.db.prepare('SELECT rowid AS seq FROM turns WHERE id=?').get(turnId).seq;
-   const pending=this.db.prepare("SELECT p.*,source.rowid AS seq FROM understanding_pending_confirmations p JOIN turns source ON source.id=p.source_turn_id WHERE p.status='pending' ORDER BY p.id DESC").all();
+   const pending=this.db.prepare("SELECT p.*,source.rowid AS seq FROM understanding_pending_confirmations p JOIN turns source ON source.id=p.source_turn_id WHERE p.status='pending' AND source.conversation_id=? ORDER BY p.id DESC").all(t.conversation_id);
    let eligible=null;
-   for(const p of pending){const n=this.db.prepare('SELECT rowid AS seq,id FROM turns WHERE rowid>? ORDER BY rowid LIMIT 1').get(p.seq);if(!n||n.seq>currentRow)continue;if(n.id===turnId&&!eligible){eligible=p;continue;}this.db.prepare("UPDATE understanding_pending_confirmations SET status='expired',resolved_at=? WHERE id=?").run(now(),p.id);}
+   for(const p of pending){const n=this.db.prepare('SELECT rowid AS seq,id FROM turns WHERE conversation_id=? AND rowid>? ORDER BY rowid LIMIT 1').get(t.conversation_id,p.seq);if(!n||n.seq>currentRow)continue;if(n.id===turnId&&!eligible){eligible=p;continue;}this.db.prepare("UPDATE understanding_pending_confirmations SET status='expired',resolved_at=? WHERE id=?").run(now(),p.id);}
    if(!eligible)return [];
    const p=eligible,old=this.current(p.claim_id),kind=this.confirmationKind(t.user);
    if(!kind||!old||old.version_id!==p.claim_version_id||!safe(t.user)||t.user.length>800){this.db.prepare("UPDATE understanding_pending_confirmations SET status='expired',resolved_at=? WHERE id=?").run(now(),p.id);return [];}
@@ -177,5 +177,5 @@ export class PersonalUnderstanding{
    this.db.prepare("UPDATE understanding_pending_confirmations SET status=?,resolved_at=? WHERE id=?").run(kind,now(),p.id);return [old.id];
   });
  }
- resolveDeferred(){const rows=this.db.prepare("SELECT DISTINCT next.id,next.rowid AS seq FROM understanding_pending_confirmations p JOIN turns source ON source.id=p.source_turn_id JOIN turns next ON next.rowid=(SELECT MIN(rowid) FROM turns WHERE rowid>source.rowid) WHERE p.status='pending' ORDER BY seq").all();return rows.flatMap(r=>this.resolve(r.id));}
+ resolveDeferred(){const rows=this.db.prepare("SELECT DISTINCT next.id,next.rowid AS seq FROM understanding_pending_confirmations p JOIN turns source ON source.id=p.source_turn_id JOIN turns next ON next.rowid=(SELECT MIN(rowid) FROM turns WHERE conversation_id=source.conversation_id AND rowid>source.rowid) WHERE p.status='pending' ORDER BY seq").all();return rows.flatMap(r=>this.resolve(r.id));}
 }
