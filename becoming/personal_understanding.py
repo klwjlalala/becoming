@@ -697,6 +697,16 @@ class PersonalUnderstanding:
             return "transient_mood"
         return None
 
+    def _all_retrieval_claims(self) -> list[Claim]:
+        claims = []
+        offset = 0
+        while True:
+            page = self.list_claims(limit=200, offset=offset)
+            claims.extend(page)
+            if len(page) < 200:
+                return claims
+            offset += 200
+
     def retrieve(self, query: str, limit: int = 7) -> list[Claim]:
         self.last_search = None
         if not isinstance(query,str) or not query.strip():
@@ -714,7 +724,7 @@ class PersonalUnderstanding:
                 "suppression_reason":suppression,
             }
             return []
-        candidates = self.list_claims(limit=100)
+        candidates = self._all_retrieval_claims()
         selected = self._rank_claims(query,candidates,limit)
         self.last_search = {
             "candidate_ids":[c.id for c in candidates],
@@ -747,7 +757,7 @@ class PersonalUnderstanding:
         return UNDERSTANDING_CONTEXT+"\n"+serialized
 
     def _candidate_claims(self, query: str) -> list[Claim]:
-        claims = self.list_claims(limit=100)
+        claims = self._all_retrieval_claims()
         q = terms(query)
         ranked=[]
         for claim in claims:
