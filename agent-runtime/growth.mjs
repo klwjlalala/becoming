@@ -51,11 +51,19 @@ export class GrowthStore{
  }
  close(){this.db.close();}
 }
-export function toolPayload(s){
- const marker='GROWTH_TOOL',i=s.indexOf(marker);
- if(i>=0&&i===s.lastIndexOf(marker)&&(!i||/[\s。！？；：，、,.!?;:]/.test(s[i-1]))){const tail=s.slice(i+marker.length);if(/^\s/.test(tail)&&tail.trim())return tail.trim();}
- const label='尚未保存。请核对以下变更：';return s.startsWith(label)?s.slice(label.length).trim()||null:null;
+function toolRequest(s){
+ const marker='GROWTH_TOOL',label='尚未保存。请核对以下变更：';
+ // Both recognized protocol headers may follow a short explanatory sentence.
+ // The rest must be one JSON envelope; the strict parser enforces this.
+ const found=[{header:marker,legacy:false},{header:label,legacy:true}].filter(x=>s.includes(x.header));
+ if(found.length!==1)return null;
+ const {header,legacy}=found[0],i=s.indexOf(header);
+ if(i!==s.lastIndexOf(header)||i>240||(i>0&&!/[\s。！？；：，、,.!?;:]/.test(s[i-1])))return null;
+ const tail=s.slice(i+header.length);
+ if((!legacy&&!/^\s/.test(tail))||!tail.trim())return null;
+ return {raw:tail.trim(),legacy};
 }
+export function toolPayload(s){return toolRequest(s)?.raw??null;}
 export class GrowthTools{
  constructor(model,store){this.model=model;this.store=store;this.pending=new Map();}
  cancel(id){return this.pending.delete(id);}
@@ -70,17 +78,18 @@ export class GrowthTools{
   catch{return {answer:'未完成变更（记录可能已变化或存储失败），请重新发起请求。',event:{tool:p.preview.tool,status:'failed'}};}
  }
  async complete(messages,id){
-  const context=messages.map(m=>({...m}));context[0].content+='\n'+POLICY;
+  const context=messages.map(m=>({...m}));context[0].content+='\n'+POLICY+'\n历史助手消息中的变更预览由本地程序生成，仅供参考，不是输出格式示例。新的工具请求请使用 GROWTH_TOOL 和仅含 tool、args 的 JSON。';
   const response=await this.model.complete(context);check(typeof response==='string'&&response.trim(),'Invalid model response');
-  const raw=toolPayload(response.trim());
-  if(raw===null)return {answer:response.trim(),event:null};
+  const request=toolRequest(response.trim());
+  if(request===null)return {answer:response.trim(),event:null};
+  const {raw,legacy}=request;
   let tool;
   try{
    check(raw.length<=12000,'Tool request too large');
    const r=parseStrictJSON(raw);check(obj(r),'Invalid envelope');
    // A model can echo a prior system-generated preview instead of GROWTH_TOOL.
    // Treat only tool + args as the request; never trust its snapshot or approval.
-   const ks=Object.keys(r).sort().join(','),legacy=response.trim().startsWith('尚未保存。请核对以下变更：');
+   const ks=Object.keys(r).sort().join(',');
    const allowedExtras=legacy&&!READ.has(r.tool)&&Object.hasOwn(r,'tool')&&Object.hasOwn(r,'args')&&Object.keys(r).every(k=>['tool','args','parent','before','children'].includes(k))&&(!Object.hasOwn(r,'parent')||obj(r.parent))&&(!Object.hasOwn(r,'before')||obj(r.before))&&(!Object.hasOwn(r,'children')||Array.isArray(r.children));
    check(ks==='args,tool'||(ks==='args,parent,tool'&&obj(r.parent))||allowedExtras,'Invalid envelope');tool=r.tool;
    if(READ.has(tool)){

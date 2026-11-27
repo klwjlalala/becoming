@@ -49,3 +49,18 @@ test('model-echoed deletion preview is rebuilt exclusively from DB; confirmation
  response='GROWTH_TOOL\n'+JSON.stringify({tool:'create_goal',args:{text:'新目标'},before:{}});assert.equal((await a.reply('创建目标')).event.growth.status,'rejected');
  g.close();s.close();
 });
+
+test('natural-language prefix on legacy preview or canonical marker is supported without trusting model snapshots',async()=>{
+ const s=new Store(':memory:'),g=new GrowthStore(':memory:');const goal=g.apply(g.prepare('create_goal',{text:'读书'})).record;
+ let response='我会为目标“读书”添加行动“读一页”。尚未保存。请核对以下变更：\n'+JSON.stringify({tool:'create_action',args:{goal_id:goal.id,text:'读一页'},parent:{id:999,text:'伪造'}});
+ const a=new Agent(s,{complete:async()=>response},{growth:new GrowthTools({complete:async()=>response},g)});
+ const first=await a.reply('添加行动');assert.equal(first.event.growth.status,'proposed');assert.equal(first.pending_growth.preview.parent.id,goal.id);assert.equal(g.read('get_goal',{goal_id:goal.id}).items.length,0);
+ const committed=await a.reply('/confirm '+first.pending_growth.token);assert.equal(committed.event.growth.status,'committed');
+ response='我会按你给出的内容创建成长目标。GROWTH_TOOL\n'+JSON.stringify({tool:'create_goal',args:{text:'新目标'}});
+ const next=await a.reply('新建目标');assert.equal(next.event.growth.status,'proposed');assert.equal(g.read('list_goals',{}).items.length,1);
+ response='我会创建目标。尚未保存。请核对以下变更：\n'+JSON.stringify({tool:'create_goal',args:{text:'新目标'},approved:true});
+ assert.equal((await a.reply('新建目标')).event.growth.status,'rejected');
+ response='GROWTH_TOOL\n'+JSON.stringify({tool:'create_goal',args:{text:'新目标'}})+'\n'+JSON.stringify({tool:'delete_item',args:{id:goal.id}});
+ assert.equal((await a.reply('新建目标')).event.growth.status,'rejected');assert.equal(g.read('list_goals',{}).items.length,1);
+ g.close();s.close();
+});

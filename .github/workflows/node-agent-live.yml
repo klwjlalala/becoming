@@ -7,7 +7,7 @@ on:
     inputs:
       suite:
         type: choice
-        options: [functional, longitudinal, scenarios]
+        options: [functional, longitudinal, scenarios, acceptance]
         default: functional
 permissions:
   contents: read
@@ -18,7 +18,7 @@ jobs:
   live:
     if: >-
       github.ref == 'refs/heads/feat/local-agent-web' &&
-      (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'fix: correct synthetic fixtures and rebuild legacy growth previews')
+      (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'fix: accept prefixed tool previews and gate live effects')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -38,7 +38,7 @@ jobs:
           BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
           BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
           BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
-          SUITE: ${{ inputs.suite || 'functional' }}
+          SUITE: ${{ inputs.suite || 'acceptance' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -53,7 +53,11 @@ jobs:
             sleep .2
           done
           curl -fsS http://127.0.0.1:8000/health >/dev/null
-          if [[ "$SUITE" == functional ]]; then
+          if [[ "$SUITE" == acceptance ]]; then
+            npm --prefix agent-runtime run test:live
+            BECOMING_REPORT=artifacts/node-effects-scenarios.json BECOMING_EFFECT_MODE=scenarios npm --prefix agent-runtime run evaluate:live
+            BECOMING_REPORT=artifacts/node-effects-longitudinal.json BECOMING_EFFECT_MODE=longitudinal npm --prefix agent-runtime run evaluate:live
+          elif [[ "$SUITE" == functional ]]; then
             npm --prefix agent-runtime run test:live
           else
             BECOMING_EFFECT_MODE="$SUITE" npm --prefix agent-runtime run evaluate:live
