@@ -129,10 +129,8 @@ class BackgroundWorker:
                 """, (status, error, status, job_id))
 
     def set_model(self, model: Model) -> None:
-        if self.long_memory is not None:
-            self.long_memory.model = model
-        if self.personal_understanding is not None:
-            self.personal_understanding.model = model
+        # The worker snapshots the provider for each job. Do not mutate
+        # a manager while its current model request is in flight.
         self.last_error = None
         self.wake()
 
