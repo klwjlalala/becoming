@@ -5,7 +5,7 @@ import {dirname} from 'node:path';
 import {BudgetedModel,runtime} from './runtime.mjs';
 const model=new BudgetedModel(36),report={fictional_data_only:true,cases:[],model_calls:0};
 const out=process.env.BECOMING_REPORT||'artifacts/node-live-functional.json';
-async function scenario(name,options,run){const rt=runtime(model,options),item={name,status:'failed'};report.cases.push(item);try{await run(rt,item);item.status='passed';}catch(e){item.error=e.message;process.exitCode=1;}finally{rt.close();console.log(name+': '+item.status+(item.error?' — '+item.error:''));}}
+async function scenario(name,options,run){const rt=runtime(model,options),item={name,status:'failed'},start=model.trace.length;report.cases.push(item);try{await run(rt,item);item.status='passed';}catch(e){item.error=e.message;item.diagnostics=model.trace.slice(start);console.log('Synthetic diagnostics: '+JSON.stringify(item.diagnostics));process.exitCode=1;}finally{rt.close();console.log(name+': '+item.status+(item.error?' — '+item.error:''));}}
 await scenario('explicit memory extract, recall, revision and forget',{memory:true,semantic:true},async(r,item)=>{
  const marker='BE-'+randomUUID().slice(0,8),next=marker+'-NEW';
  await r.reply('请将这条虚构信息保存为长期事实记忆，key 使用 test_code：我的测试代号是 '+marker+'。');
@@ -35,5 +35,5 @@ await scenario('explicit understanding formation and correction',{understanding:
  const answer=await r.reply('结合之前聊过的内容，我真正想要什么样的生活？');item.answer=answer;assert.ok(answer.event.retrieved_claim_ids.length);
  for(const c of r.u.list()){const current=r.u.history(c.id).find(v=>v.version===c.version);assert.ok(current.evidence.length);for(const e of current.evidence)assert.ok(r.store.turn(e.source_turn_id).user.includes(e.quote));}
 });
-report.model_calls=model.calls;report.max_calls=model.limit;report.call_durations_ms=model.timings;
+report.trace=model.trace;report.model_calls=model.calls;report.max_calls=model.limit;report.call_durations_ms=model.timings;
 mkdirSync(dirname(out),{recursive:true});writeFileSync(out,JSON.stringify(report,null,2)+'\n');console.log('Model calls:',model.calls,'/',model.limit);

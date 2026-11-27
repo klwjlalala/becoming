@@ -4,8 +4,8 @@ import {LongMemory} from '../memory.mjs';
 import {PersonalUnderstanding} from '../understanding.mjs';
 import {GrowthStore,GrowthTools} from '../growth.mjs';
 export class BudgetedModel{
- constructor(limit=60){this.limit=limit;this.calls=0;this.timings=[];this.gateway=new Gateway(process.env.BECOMING_GATEWAY||'http://127.0.0.1:8000');}
- async complete(messages){if(this.calls>=this.limit)throw Error('Model call budget exhausted');this.calls++;const start=performance.now();try{return await this.gateway.complete(messages);}finally{this.timings.push(Math.round(performance.now()-start));}}
+ constructor(limit=60){this.limit=limit;this.calls=0;this.timings=[];this.trace=[];this.gateway=new Gateway(process.env.BECOMING_GATEWAY||'http://127.0.0.1:8000');}
+ async complete(messages){if(this.calls>=this.limit)throw Error('Model call budget exhausted');this.calls++;const start=performance.now();try{const answer=await this.gateway.complete(messages);this.trace.push({call:this.calls,purpose:messages[0].content.slice(0,70),input:messages.at(-1).content.slice(0,12000),output:answer.slice(0,12000)});return answer;}catch(e){this.trace.push({call:this.calls,error:e.message});throw e;}finally{this.timings.push(Math.round(performance.now()-start));}}
 }
 export function runtime(model,{memory=false,semantic=false,understanding=false,growth=false,historyTurns=0}={}){
  const store=new Store(':memory:'),m=memory?new LongMemory(store,model,{semantic}):null,u=understanding?new PersonalUnderstanding(store,model):null,g=growth?new GrowthStore(':memory:'):null,tools=g?new GrowthTools(model,g):null;
