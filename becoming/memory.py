@@ -204,6 +204,15 @@ class SQLiteConversationStore:
             count = self.connection.execute(
                 "SELECT COUNT(*) FROM turns WHERE conversation_id=?", (conversation_id,)
             ).fetchone()[0]
+            # API receipts contain cached reply data, which may include facts
+            # from other conversations. Invalidate them in the same transaction.
+            if self.connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='api_message_requests'"
+            ).fetchone():
+                self.connection.execute(
+                    "DELETE FROM api_message_requests WHERE conversation_id=?", (conversation_id,)
+                )
+                self.connection.execute("UPDATE api_message_requests SET response_json=NULL")
             self.connection.execute(
                 "DELETE FROM turns WHERE conversation_id=?", (conversation_id,)
             )
