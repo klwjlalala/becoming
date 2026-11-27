@@ -19,6 +19,23 @@ class ModelNotConfigured(RuntimeError):
     pass
 
 
+class RequestModel:
+    """Release the request lock only during model I/O on the active chat thread."""
+
+    def __init__(self, runtime, model):
+        self.runtime, self.model = runtime, model
+
+    def complete(self, messages):
+        rt = self.runtime
+        if rt.active_chat_thread != threading.get_ident():
+            return self.model.complete(messages)
+        rt.lock.release()
+        try:
+            return self.model.complete(messages)
+        finally:
+            rt.lock.acquire()
+
+
 class AppRuntime:
     """Single-user API runtime.
 
@@ -42,6 +59,7 @@ class AppRuntime:
                 raise ValueError("Conversation and growth databases must be separate")
 
         self.lock = threading.RLock()
+        self.active_chat_thread: int | None = None
         self.db_path = (
             str(Path(db_path).resolve()) if str(db_path) != ":memory:" else ":memory:"
         )
@@ -70,6 +88,16 @@ class AppRuntime:
         self.agents: dict[str, GrowthAgent] = {}
         self.pending_growth_changes: dict[str, dict] = {}
         self.pending_data_clears: set[str] = set()
+        with self.store.connection:
+            self.store.connection.execute("""
+                CREATE TABLE IF NOT EXISTS api_message_requests (
+                    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                    request_id TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    response_json TEXT,
+                    PRIMARY KEY(conversation_id, request_id)
+                )
+            """)
 
     @classmethod
     def from_env(cls) -> "AppRuntime":
@@ -150,7 +178,7 @@ class AppRuntime:
         existing = self.agents.get(conversation_id)
         if existing is not None:
             return existing
-        model = self.require_model()
+        model = RequestModel(self, self.require_model())
         scoped = self.store.for_conversation(conversation_id)
         memory = (
             LongMemory(scoped, model, initialize_schema=False)
