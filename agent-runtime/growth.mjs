@@ -78,7 +78,10 @@ export class GrowthTools{
   catch{return {answer:'未完成变更（记录可能已变化或存储失败），请重新发起请求。',event:{tool:p.preview.tool,status:'failed'}};}
  }
  async complete(messages,id){
-  const context=messages.map(m=>({...m}));context[0].content+='\n'+POLICY+'\n历史助手消息中的变更预览由本地程序生成，仅供参考，不是输出格式示例。新的工具请求请使用 GROWTH_TOOL 和仅含 tool、args 的 JSON。';
+  // Keep raw transcript for the user; don't teach the model to imitate
+  // local preview envelopes in subsequent turns. Confirmed result messages
+  // remain available with authoritative IDs and state.
+  const context=messages.map(m=>m.role==='assistant'&&m.content.startsWith('尚未保存。请核对以下变更：')?{...m,content:'已向用户展示本地变更预览；这并不表示已执行。请以随后的本地确认结果为准。'}:{...m});context[0].content+='\n'+POLICY+'\n历史助手消息中的变更预览由本地程序生成，仅供参考，不是输出格式示例。新的工具请求请使用 GROWTH_TOOL 和仅含 tool、args 的 JSON。';
   const response=await this.model.complete(context);check(typeof response==='string'&&response.trim(),'Invalid model response');
   const request=toolRequest(response.trim());
   if(request===null)return {answer:response.trim(),event:null};
@@ -90,7 +93,10 @@ export class GrowthTools{
    // A model can echo a prior system-generated preview instead of GROWTH_TOOL.
    // Treat only tool + args as the request; never trust its snapshot or approval.
    const ks=Object.keys(r).sort().join(',');
-   const allowedExtras=legacy&&!READ.has(r.tool)&&Object.hasOwn(r,'tool')&&Object.hasOwn(r,'args')&&Object.keys(r).every(k=>['tool','args','parent','before','children'].includes(k))&&(!Object.hasOwn(r,'parent')||obj(r.parent))&&(!Object.hasOwn(r,'before')||obj(r.before))&&(!Object.hasOwn(r,'children')||Array.isArray(r.children));
+   // Legacy previews may contain arbitrarily named record snapshots. Accept
+   // bounded structured metadata only, discard it entirely, and validate
+   // the projected tool/args against the actual tool schema.
+   const allowedExtras=legacy&&TOOLS.has(r.tool)&&!READ.has(r.tool)&&Object.hasOwn(r,'tool')&&Object.hasOwn(r,'args')&&Object.keys(r).length<=16&&Object.entries(r).every(([k,v])=>k==='tool'||k==='args'||(!/^(?:approve|approved|approval|confirm|confirmed|confirmation|token|nonce|execute|executed|commit|committed|__proto__|constructor|prototype)$/i.test(k)&&(obj(v)||Array.isArray(v))));
    check(ks==='args,tool'||(ks==='args,parent,tool'&&obj(r.parent))||allowedExtras,'Invalid envelope');tool=r.tool;
    if(READ.has(tool)){
     const args=validate(tool,r.args),result=this.store.read(tool,args),event={tool,args,status:'read',result};

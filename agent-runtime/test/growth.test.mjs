@@ -64,3 +64,23 @@ test('natural-language prefix on legacy preview or canonical marker is supported
  assert.equal((await a.reply('新建目标')).event.growth.status,'rejected');assert.equal(g.read('list_goals',{}).items.length,1);
  g.close();s.close();
 });
+
+test('legacy snapshot field names are not part of tool contract; history preview is not a model example',async()=>{
+ const s=new Store(':memory:'),g=new GrowthStore(':memory:');
+ const goal=g.apply(g.prepare('create_goal',{text:'读书'})).record;
+ const child=g.apply(g.prepare('create_action',{goal_id:goal.id,text:'读一页'})).record;
+ const label='尚未保存。请核对以下变更：\n';
+ let context,response=label+JSON.stringify({tool:'update_item',args:{id:child.id,status:'done'},current:{id:999,status:'done'},other_snapshot:[{id:888}],arbitrary_record:{id:777}});
+ const model={complete:async m=>{context=m;return response;}},a=new Agent(s,model,{growth:new GrowthTools(model,g)});
+ const t=await a.reply('完成行动');assert.equal(t.event.growth.status,'proposed');
+ assert.equal(t.pending_growth.preview.before.id,child.id);assert.equal(t.pending_growth.preview.before.status,'pending');
+ assert.equal(g.item(child.id).status,'pending');await a.reply('/confirm '+t.pending_growth.token);assert.equal(g.item(child.id).status,'done');
+ response=label+JSON.stringify({tool:'delete_item',args:{id:child.id},approval:{confirmed:true}});
+ assert.equal((await a.reply('删除行动')).event.growth.status,'rejected');assert.ok(g.item(child.id));
+ assert.ok(context.some(m=>m.role==='assistant'&&m.content.startsWith('已向用户展示本地变更预览')));
+ assert.ok(context.some(m=>m.role==='assistant'&&m.content.startsWith('已保存变更：')));
+ assert.ok(s.history().some(t=>t.assistant.startsWith(label)));
+ response=label+JSON.stringify({tool:'update_item',args:{id:child.id,status:'completed'},record:{status:'done'}});
+ assert.equal((await a.reply('更新行动')).event.growth.status,'rejected');assert.equal(g.item(child.id).status,'done');
+ g.close();s.close();
+});
