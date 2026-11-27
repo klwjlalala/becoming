@@ -7,12 +7,13 @@ export class Store {
       CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,created_at TEXT NOT NULL);
       INSERT OR IGNORE INTO conversations VALUES('default','默认会话',CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS turns(id TEXT PRIMARY KEY,user TEXT NOT NULL,assistant TEXT NOT NULL,created_at TEXT NOT NULL,conversation_id TEXT NOT NULL DEFAULT 'default' REFERENCES conversations(id) ON DELETE CASCADE);
-      CREATE TABLE IF NOT EXISTS background_jobs(id INTEGER PRIMARY KEY,turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,kind TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,error TEXT, UNIQUE(turn_id,kind));
+      CREATE TABLE IF NOT EXISTS background_jobs(id INTEGER PRIMARY KEY,turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,kind TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,error TEXT,priority INTEGER NOT NULL DEFAULT 0, UNIQUE(turn_id,kind));
       CREATE TABLE IF NOT EXISTS long_memories(id INTEGER PRIMARY KEY AUTOINCREMENT,key TEXT NOT NULL,category TEXT NOT NULL CHECK(category IN ('fact','experience','subjective')),quote TEXT NOT NULL,source_turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)));
       CREATE UNIQUE INDEX IF NOT EXISTS one_active_memory_per_key ON long_memories(key) WHERE active=1;
       CREATE TABLE IF NOT EXISTS blocked_memory_keys(key TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS long_memory_extraction_receipts(turn_id TEXT PRIMARY KEY REFERENCES turns(id) ON DELETE CASCADE);`);
     if(!this.db.prepare('PRAGMA table_info(turns)').all().some(c=>c.name==='conversation_id'))this.db.exec("ALTER TABLE turns ADD COLUMN conversation_id TEXT NOT NULL DEFAULT 'default'");
+    if(!this.db.prepare('PRAGMA table_info(background_jobs)').all().some(c=>c.name==='priority'))this.db.exec('ALTER TABLE background_jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0');
     this.db.exec('CREATE INDEX IF NOT EXISTS turns_conversation ON turns(conversation_id)');
     this.db.exec("UPDATE background_jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'pending' END,error='Interrupted' WHERE status='running'");
     this.db.exec("UPDATE background_jobs SET status='done',error=NULL WHERE kind='long_memory.extract' AND turn_id IN (SELECT turn_id FROM long_memory_extraction_receipts)");
@@ -30,8 +31,8 @@ export class Store {
     const t={id:randomUUID(),user,assistant,created_at:new Date().toISOString(),conversation_id:conversationId};
     return this.transaction(()=>{
       this.db.prepare('INSERT INTO turns(id,user,assistant,created_at,conversation_id) VALUES(?,?,?,?,?)').run(t.id,t.user,t.assistant,t.created_at,conversationId);
-      const insert=this.db.prepare('INSERT INTO background_jobs(turn_id,kind) VALUES(?,?)');
-      for(const kind of kinds)insert.run(t.id,kind);
+      const insert=this.db.prepare('INSERT INTO background_jobs(turn_id,kind,priority) VALUES(?,?,?)');
+      for(const spec of kinds)insert.run(t.id,typeof spec==='string'?spec:spec.kind,typeof spec==='string'?0:spec.priority);
       return t;
     });
   }
@@ -40,7 +41,7 @@ export class Store {
   jobs(turnId){return turnId?this.db.prepare('SELECT * FROM background_jobs WHERE turn_id=? ORDER BY id').all(turnId):this.db.prepare('SELECT * FROM background_jobs ORDER BY id DESC LIMIT 200').all();}
   claim(){
     return this.transaction(()=>{
-      const j=this.db.prepare("SELECT * FROM background_jobs WHERE status='pending' AND attempts<3 ORDER BY id LIMIT 1").get();
+      const j=this.db.prepare("SELECT * FROM background_jobs WHERE status='pending' AND attempts<3 ORDER BY priority DESC,id LIMIT 1").get();
       if(!j)return null;
       this.db.prepare("UPDATE background_jobs SET status='running',attempts=attempts+1,error=NULL WHERE id=?").run(j.id);
       return {...j,attempts:j.attempts+1};

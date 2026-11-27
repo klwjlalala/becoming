@@ -1,0 +1,65 @@
+name: Node agent real-model acceptance
+on:
+  push:
+    branches: [feat/local-agent-web]
+    paths: ['.github/workflows/node-agent-live.yml']
+  workflow_dispatch:
+    inputs:
+      suite:
+        type: choice
+        options: [functional, longitudinal, scenarios]
+        default: functional
+permissions:
+  contents: read
+concurrency:
+  group: node-agent-live-acceptance
+  cancel-in-progress: false
+jobs:
+  live:
+    if: github.ref == 'refs/heads/feat/local-agent-web' && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'test: Node agent acceptance and one-shot live functional run')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e .
+      - run: npm --prefix agent-runtime test
+      - name: Run against configured real model
+        env:
+          BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
+          BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
+          BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
+          SUITE: ${{ inputs.suite || 'functional' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for k in BECOMING_BASE_URL BECOMING_API_KEY BECOMING_MODEL; do
+            if [[ -z "${!k}" ]]; then echo "::error::Missing repository secret: $k"; exit 1; fi
+          done
+          python -m uvicorn server.app:app --host 127.0.0.1 --port 8000 >/tmp/becoming-gateway.log 2>&1 &
+          gateway_pid=$!
+          trap 'kill "$gateway_pid" 2>/dev/null || true' EXIT
+          for i in {1..50}; do
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then break; fi
+            sleep .2
+          done
+          curl -fsS http://127.0.0.1:8000/health >/dev/null
+          if [[ "$SUITE" == functional ]]; then
+            npm --prefix agent-runtime run test:live
+          else
+            BECOMING_EFFECT_MODE="$SUITE" npm --prefix agent-runtime run evaluate:live
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: node-agent-acceptance-report
+          path: agent-runtime/artifacts/*.json
+          if-no-files-found: warn
+          retention-days: 14

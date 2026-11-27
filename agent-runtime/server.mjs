@@ -23,7 +23,7 @@ mkdirSync(dirname(growthPath),{recursive:true});
 const growth=new GrowthTools(gateway,new GrowthStore(growthPath));
 const agent=new Agent(store,gateway,{memory,understanding,growth});
 const worker=new BackgroundWorker(store,{'long_memory.extract':id=>{if(!memory)throw Error('Memory disabled');return memory.extract(id);},'personal_understanding.process':id=>{if(!understanding)throw Error('Understanding disabled');return understanding.processTurn(id);}});
-setInterval(()=>{void worker.tick();},1000).unref();
+setInterval(()=>{worker.tick().catch(()=>console.error('Background worker tick failed'));},1000).unref();
 const assets=new Map([['/',['text/html; charset=utf-8','index.html']],['/app.js',['text/javascript; charset=utf-8','app.js']],['/style.css',['text/css; charset=utf-8','style.css']]]);
 function json(res,status,body){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(body));}
 async function body(req){

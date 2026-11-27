@@ -140,8 +140,8 @@ export class PersonalUnderstanding{
  enqueue(turnId){
   const t=this.store.turn(turnId);check(t,'Missing source');this.db.prepare("INSERT OR IGNORE INTO understanding_jobs(job_key,source_turn_id,kind,status,created_at,updated_at) VALUES(?,?,?,'pending',?,?)").run('turn:'+turnId,turnId,isUrgent(t.user)?'immediate':'normal',now(),now());
  }
- async processPending(){
-  const jobs=this.db.prepare("SELECT j.id AS job_id,t.id AS turn_id,t.user AS user_text,t.assistant AS assistant_text,t.created_at AS recorded_at FROM understanding_jobs j JOIN turns t ON t.id=j.source_turn_id WHERE j.status IN ('pending','failed') AND j.attempts<3 ORDER BY CASE WHEN j.kind='immediate' THEN 0 ELSE 1 END,j.id LIMIT 5").all();
+ async processPending(targetId=null){
+  const jobs=this.db.prepare("SELECT j.id AS job_id,t.id AS turn_id,t.user AS user_text,t.assistant AS assistant_text,t.created_at AS recorded_at FROM understanding_jobs j JOIN turns t ON t.id=j.source_turn_id WHERE j.status IN ('pending','failed') AND j.attempts<3 ORDER BY CASE WHEN j.source_turn_id=? THEN -1 WHEN j.kind='immediate' THEN 0 ELSE 1 END,j.id LIMIT 5").all(targetId);
   if(!jobs.length)return [];
   const q=terms(jobs.map(t=>t.user_text).join('\n')),claims=this.list().sort((a,b)=>this.overlap(q,b,3)-this.overlap(q,a,3)||b.updated_at.localeCompare(a.updated_at)).slice(0,15),prior=new Map(claims.map(c=>[c.id,new Set(this.evidence(c.version_id,4).map(e=>e.id))]));
   const payload={turns:jobs.map((t,i)=>({turn_index:i,source_turn_id:t.turn_id,user_text:t.user_text,assistant_text:t.assistant_text,recorded_at:t.recorded_at})),current_claims:claims.map(c=>this.payload(c,true)),rules:{max_turns:5,no_write_is_valid:true,source_of_evidence:'user_text_only'}};
@@ -153,8 +153,12 @@ export class PersonalUnderstanding{
   }catch(e){this.store.transaction(()=>{for(const j of jobs)this.db.prepare("UPDATE understanding_jobs SET status='failed',last_error='update_failed',updated_at=? WHERE id=?").run(now(),j.job_id);});throw e;}
  }
  async processTurn(id){
-  this.enqueue(id);const status=()=>this.db.prepare('SELECT status,attempts FROM understanding_jobs WHERE source_turn_id=?').get(id);
-  if(status().status!=='done'){check(status().attempts<3,'Understanding attempts exhausted');await this.processPending();}
+  // Register already queued turns before choosing a batch. All source turns
+  // were durably committed by the Agent; acknowledgements remain per turn.
+  this.enqueue(id);
+  for(const j of this.db.prepare("SELECT turn_id FROM background_jobs WHERE kind='personal_understanding.process' AND status IN ('pending','running') ORDER BY priority DESC,id LIMIT 20").all())this.enqueue(j.turn_id);
+  const status=()=>this.db.prepare('SELECT status,attempts FROM understanding_jobs WHERE source_turn_id=?').get(id);
+  if(status().status!=='done'){check(status().attempts<3,'Understanding attempts exhausted');await this.processPending(id);}
   this.resolveDeferred();check(status().status==='done','Understanding job not completed');
  }
  confirmationKind(s){

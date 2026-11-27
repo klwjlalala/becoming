@@ -7,6 +7,9 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "test:live": "node validation/live.mjs",
+    "test:effects": "node validation/effects.mjs",
+    "evaluate:live": "node validation/effects.mjs --live"
   }
 }
