@@ -163,8 +163,9 @@ class ModelBoundaryTests(unittest.TestCase):
     def setUp(self):
         self.model = OpenAICompatibleModel("https://example.test/v1/", "fake-test-key", "test", timeout=3)
 
-    @patch("becoming.models.urlopen")
-    def test_request_contract(self, send):
+    @patch("becoming.models.build_opener")
+    def test_request_contract(self, opener):
+        send = opener.return_value.open
         send.return_value = io.BytesIO(json.dumps({"choices": [{"message": {"content": "  好  "}}]},
                                                   ensure_ascii=False).encode())
         messages = [{"role": "user", "content": "中文"}]
@@ -177,8 +178,9 @@ class ModelBoundaryTests(unittest.TestCase):
         self.assertEqual(json.loads(request.data), {"model": "test", "messages": messages})
         self.assertEqual(send.call_args.kwargs["timeout"], 3)
 
-    @patch("becoming.models.urlopen")
-    def test_http_errors_are_safe_and_not_retried(self, send):
+    @patch("becoming.models.build_opener")
+    def test_http_errors_are_safe_and_not_retried(self, opener):
+        send = opener.return_value.open
         for status in (400, 401, 403, 404, 429, 500, 503):
             with self.subTest(status=status):
                 send.reset_mock()
@@ -188,24 +190,27 @@ class ModelBoundaryTests(unittest.TestCase):
                 self.assertNotIn("fake-test-key", str(caught.exception))
                 send.assert_called_once()
 
-    @patch("becoming.models.urlopen")
-    def test_network_and_timeout_errors(self, send):
+    @patch("becoming.models.build_opener")
+    def test_network_and_timeout_errors(self, opener):
+        send = opener.return_value.open
         for failure in (URLError("private detail"), TimeoutError(), OSError("private detail")):
             with self.subTest(failure=type(failure).__name__):
                 send.side_effect = failure
                 with self.assertRaisesRegex(ModelError, "Model connection failed"):
                     self.model.complete([])
 
-    @patch("becoming.models.urlopen")
-    def test_malformed_payloads(self, send):
+    @patch("becoming.models.build_opener")
+    def test_malformed_payloads(self, opener):
+        send = opener.return_value.open
         for raw in (b"not json", b"{}", b"null", b'{"choices":[]}', b'{"choices":[{}]}'):
             with self.subTest(raw=raw):
                 send.return_value = io.BytesIO(raw)
                 with self.assertRaisesRegex(ModelError, "Invalid model response"):
                     self.model.complete([])
 
-    @patch("becoming.models.urlopen")
-    def test_invalid_content_types(self, send):
+    @patch("becoming.models.build_opener")
+    def test_invalid_content_types(self, opener):
+        send = opener.return_value.open
         for value in (None, "", "  ", 12, [], {}):
             with self.subTest(value=value):
                 send.return_value = io.BytesIO(json.dumps({"choices": [{"message": {"content": value}}]}).encode())
