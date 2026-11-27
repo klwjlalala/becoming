@@ -16,7 +16,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   live:
-    if: github.ref == 'refs/heads/feat/local-agent-web' && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'test: Node agent acceptance and one-shot live functional run')
+    if: >-
+      github.ref == 'refs/heads/feat/local-agent-web' &&
+      (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'test: Node agent acceptance and one-shot live functional run')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
