@@ -138,7 +138,7 @@ try{
   const revisedPlan=revisionTurn.assistant||'';
   const revisionChecks={
     substantive_revision:{passed:Array.from(revisedPlan).length>=350,detail:{characters:Array.from(revisedPlan).length}},
-    retains_three_day_structure:{passed:/第一天|第1天|Day\s*1/i.test(revisedPlan)&&/第二天|第2天|Day\s*2/i.test(revisedPlan)&&/第三天|第3天|Day\s*3/i.test(revisedPlan)},
+    retains_three_day_structure:{passed:/第一天|第\s*1\s*天|Day\s*1/i.test(revisedPlan)&&/第二天|第\s*2\s*天|Day\s*2/i.test(revisedPlan)&&/第三天|第\s*3\s*天|Day\s*3/i.test(revisedPlan)},
     adapts_to_mobile_only_constraint:{passed:/手机|移动端|手机端/.test(revisedPlan)},
     preserves_daily_time_limit:{passed:/30\s*分钟|30分钟|半小时/.test(revisedPlan)},
     uses_existing_html_css_knowledge:{passed:/HTML|CSS/.test(revisedPlan)},
