@@ -7,6 +7,7 @@ on:
       - 'agent-runtime/validation/meaning-design-acceptance.mjs'
       - 'agent-runtime/validation/fixtures/meaning-design-*'
       - 'agent-runtime/package.json'
+      - 'agent-runtime/prompt.mjs'
       - '.github/workflows/node-agent-meaning-design.yml'
   workflow_dispatch:
     inputs:
