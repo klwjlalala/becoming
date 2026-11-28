@@ -1,0 +1,104 @@
+name: Node agent native tool-call probe
+
+on:
+  push:
+    branches:
+      - feat/agent-capabilities-v1
+    paths:
+      - 'server/app.py'
+      - 'agent-runtime/agent.mjs'
+      - 'agent-runtime/capabilities/**'
+      - 'agent-runtime/validation/tool-call-probe.mjs'
+      - '.github/workflows/node-agent-toolcall-probe.yml'
+  workflow_dispatch:
+    inputs:
+      probe_image:
+        description: 'Run one paid image-generation smoke test (requires image model secrets)'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node-agent-tool-call-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: github.ref == 'refs/heads/feat/agent-capabilities-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install gateway dependencies
+        run: python -m pip install -e .
+      - name: Check Python gateway syntax
+        run: python -m py_compile server/app.py
+      - name: Run deterministic Node tests
+        run: npm --prefix agent-runtime test
+      - name: Verify model secrets
+        env:
+          BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
+          BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
+          BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for key in BECOMING_BASE_URL BECOMING_API_KEY BECOMING_MODEL; do
+            if [[ -z "${!key}" ]]; then echo "::error::Missing repository secret: $key"; exit 1; fi
+          done
+      - name: Start model gateway
+        env:
+          BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
+          BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
+          BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
+          BECOMING_IMAGE_MODEL: ${{ secrets.BECOMING_IMAGE_MODEL }}
+          BECOMING_IMAGE_BASE_URL: ${{ secrets.BECOMING_IMAGE_BASE_URL }}
+          BECOMING_IMAGE_API_KEY: ${{ secrets.BECOMING_IMAGE_API_KEY }}
+        run: |
+          python -m uvicorn server.app:app --host 127.0.0.1 --port 8000 >/tmp/becoming-gateway.log 2>&1 &
+          echo $! > /tmp/becoming-gateway.pid
+          for i in {1..50}; do
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then exit 0; fi
+            sleep .2
+          done
+          cat /tmp/becoming-gateway.log
+          exit 1
+      - name: Probe native function calling
+        env:
+          BECOMING_GATEWAY: http://127.0.0.1:8000
+          TOOL_CALL_REPORT: agent-runtime/artifacts/tool-call-probe.json
+        run: node agent-runtime/validation/tool-call-probe.mjs
+      - name: Probe image generation (manual opt-in only)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.probe_image }}
+        env:
+          BECOMING_GATEWAY: http://127.0.0.1:8000
+          IMAGE_PROBE_REPORT: agent-runtime/artifacts/image-generation-probe.json
+        run: node agent-runtime/validation/image-generation-probe.mjs
+      - name: Upload probe report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-agent-tool-call-probe
+          path: |
+            agent-runtime/artifacts/tool-call-probe.json
+            agent-runtime/artifacts/image-generation-probe.json
+            agent-runtime/artifacts/image-generation-probe.png
+            agent-runtime/artifacts/image-generation-probe.jpg
+            agent-runtime/artifacts/image-generation-probe.webp
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Stop model gateway
+        if: always()
+        run: |
+          if [[ -f /tmp/becoming-gateway.pid ]]; then kill "$(cat /tmp/becoming-gateway.pid)" 2>/dev/null || true; fi

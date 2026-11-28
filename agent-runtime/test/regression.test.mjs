@@ -48,9 +48,30 @@ test('revision, reinforcement, dispute, rejection and expire preserve history',a
  await update('你理解错了，我不认同这个概括',q=>proposal(q,revise('REJECT','用户重视有条件的自由','counter'),'correction'));assert.equal(u.current(id).status,'rejected');assert.equal(u.list().length,0);
  assert.deepEqual(u.revisions(id).map(r=>r.operation),['CREATE','REINFORCE','REFINE','DISPUTE','REJECT']);assert.equal(u.history(id).length,5);s.close();
 });
-test('ambiguous memory replacement is rejected without overwriting old source',async()=>{
- const s=new Store(':memory:');let raw;const m=new HistoricalMemory(s,{complete:async()=>raw},{improved:true});
+test('ambiguous memory replacement is rejected without failing background extraction',async()=>{
+ const s=new Store(':memory:');let calls=0;const m=new LongMemory(s,{complete:async()=>{calls++;return '[{"key":"偏好","category":"subjective","quote":"我喜欢和朋友交流","replaces":null}]';}});
  const old=s.append('我喜欢安静的地方','ok');const [id]=m.write(old.id,[{key:'偏好',category:'subjective',quote:old.user}]);
- const next=s.append('我喜欢和朋友交流','ok');raw=JSON.stringify([{key:'偏好',category:'subjective',quote:next.user,replaces:id}]);
- await assert.rejects(m.extract(next.id));assert.equal(m.list()[0].id,id);assert.equal(m.receipt(next.id),undefined);s.close();
+ const next=s.append('我喜欢和朋友交流','ok');const result=await m.extract(next.id);
+ assert.deepEqual(result,{written:[],rejected:1});assert.equal(m.list()[0].id,id);assert.ok(m.receipt(next.id));
+ await m.extract(next.id);assert.equal(calls,1);s.close();
+});
+test('long-memory retrieval suppresses third-party, transient mood, and listen-only context',async()=>{
+ const s=new Store(':memory:');const m=new LongMemory(s,{complete:async()=>''});
+ const seed=s.append('我暂时不想冒险辞职。','ok');
+ const [id]=m.write(seed.id,[{key:'career_risk_preference',category:'subjective',quote:'我暂时不想冒险辞职'}]);
+ const a=new Agent(s,{complete:async()=> '我听到了。'},{memory:m,historyTurns:12});
+ const cases=[
+  ['我朋友最近说他想辞职创业，我只是听他吐槽。','third_party_only'],
+  ['今天有点烦，什么都不想做，明天应该就好了。','transient_mood'],
+  ['我最近有点迷茫，先别给我方案，我只是想说说。','listen_only']
+ ];
+ for(const [query,reason] of cases){
+  const turn=await a.reply(query);
+  assert.deepEqual(turn.event.retrieved_memory_ids,[]);
+  assert.equal(turn.event.memory_search.query_mode,'suppressed');
+  assert.equal(turn.event.memory_search.suppression_reason,reason);
+ }
+ const personal=await a.reply('我自己也在考虑是否辞职，但暂时不想冒险。');
+ assert.ok(personal.event.retrieved_memory_ids.includes(id));
+ s.close();
 });

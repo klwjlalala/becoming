@@ -1,5 +1,12 @@
 import {SYSTEM_PROMPT} from './prompt.mjs';
 import {isUrgent} from './understanding.mjs';
+import {runCapabilityLoop} from './capabilities/registry.mjs';
+
+function aborted(){const error=new Error('Request cancelled');error.name='AbortError';return error;}
+function combinedSignal(signal){
+  const timeout=AbortSignal.timeout(180000);
+  return signal?AbortSignal.any([signal,timeout]):timeout;
+}
 export class Gateway{
   constructor(url){
     const u=new URL(url);if(u.username||u.password||u.search||u.hash||!(u.protocol==='https:'||(u.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(u.hostname))))throw Error('Gateway requires HTTPS or loopback HTTP');
@@ -13,43 +20,227 @@ export class Gateway{
       const {vectors}=await res.json();if(!Array.isArray(vectors)||vectors.length!==batch.length)throw Error('Invalid embedding count');all.push(...vectors);
     }return all;
   }
-  async complete(messages){
-    const res=await fetch(this.url+'/v1/llm/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages}),redirect:'error',signal:AbortSignal.timeout(90000)});
+  async complete(messages,{signal}={}){
+    const res=await fetch(this.url+'/v1/llm/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages}),redirect:'error',signal:combinedSignal(signal)});
     if(!res.ok)throw Error('Gateway HTTP '+res.status);
     const {text}=await res.json();if(typeof text!=='string'||!text.trim()||text.length>64000)throw Error('Invalid model response');return text.trim();
   }
+  async completeStructured(messages,{tools=[],tool_choice='auto',signal}={}){
+    if(!Array.isArray(messages)||!messages.length||!Array.isArray(tools)||tools.length>32)throw Error('Invalid structured completion request');
+    const res=await fetch(this.url+'/v1/llm/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages,tools,tool_choice}),redirect:'error',signal:combinedSignal(signal)});
+    if(!res.ok)throw Error('Gateway structured completion HTTP '+res.status);
+    const result=await res.json(),text=result.text,toolCalls=result.tool_calls??[];
+    if(typeof text!=='string'||text.length>64000||!Array.isArray(toolCalls)||toolCalls.length>16||(!text.trim()&&!toolCalls.length))throw Error('Invalid structured model response');
+    for(const call of toolCalls){
+      const fn=call?.function;
+      if(typeof call?.id!=='string'||call.type!=='function'||typeof fn?.name!=='string'||typeof fn?.arguments!=='string'||fn.arguments.length>12000)throw Error('Invalid structured tool call');
+    }
+    return {text:text.trim(),tool_calls:toolCalls,finish_reason:result.finish_reason??null,usage:result.usage??null};
+  }
+  async streamStructured(messages,{tools=[],tool_choice='auto',signal,onToken}={}){
+    if(!Array.isArray(messages)||!messages.length||!Array.isArray(tools)||tools.length>32)throw Error('Invalid structured stream request');
+    const res=await fetch(this.url+'/v1/llm/stream',{method:'POST',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify({messages,tools,tool_choice}),redirect:'error',signal:combinedSignal(signal)});
+    if(!res.ok){let detail='';try{detail=(await res.text()).slice(0,400);}catch{}throw Error('Gateway structured stream HTTP '+res.status+(detail?': '+detail:''));}
+    if(!(res.headers.get('content-type')||'').toLowerCase().includes('text/event-stream'))throw Error('Gateway did not return an SSE stream');
+    if(!res.body)throw Error('Gateway stream body unavailable');
+    const reader=res.body.getReader(),decoder=new TextDecoder(),toolCalls=new Map();
+    let buffer='',text='',finished=false,completed=false,finishReason=null,usage=null;
+    const parseFrame=frame=>{
+      let event='message';const data=[];
+      for(const line of frame.split(/\r?\n/)){
+        if(line.startsWith('event:'))event=line.slice(6).trim();
+        else if(line.startsWith('data:'))data.push(line.slice(5).replace(/^ /,''));
+      }
+      if(!data.length)return;
+      const raw=data.join('\n');
+      if(raw.trim()==='[DONE]'){finished=true;return;}
+      let payload;try{payload=JSON.parse(raw);}catch{throw Error('Invalid upstream SSE payload');}
+      if(event==='error'||payload?.error)throw Error('Upstream model stream error');
+      const choice=payload?.choices?.[0];
+      if(!choice){if(payload?.usage){usage=payload.usage;return;}throw Error('Invalid upstream stream chunk');}
+      const delta=choice.delta||{},content=delta.content;
+      if(typeof content==='string'&&content){text+=content;onToken?.(content);}
+      else if(Array.isArray(content))for(const part of content)if(part?.type==='text'&&typeof part.text==='string'&&part.text){text+=part.text;onToken?.(part.text);}
+      for(const partial of delta.tool_calls||[]){
+        const index=Number.isInteger(partial.index)?partial.index:toolCalls.size;
+        const current=toolCalls.get(index)||{id:'',type:'function',function:{name:'',arguments:''}};
+        if(typeof partial.id==='string'&&partial.id)current.id=partial.id;
+        if(typeof partial.type==='string')current.type=partial.type;
+        if(typeof partial.function?.name==='string')current.function.name+=partial.function.name;
+        if(typeof partial.function?.arguments==='string')current.function.arguments+=partial.function.arguments;
+        toolCalls.set(index,current);
+      }
+      if(choice.finish_reason!==null&&choice.finish_reason!==undefined){completed=true;finishReason=choice.finish_reason;}
+      if(payload.usage)usage=payload.usage;
+    };
+    try{
+      while(!finished){
+        const {value,done}=await reader.read();if(done)break;
+        buffer+=decoder.decode(value,{stream:true});let match;
+        while((match=/\r?\n\r?\n/.exec(buffer))&&!finished){const frame=buffer.slice(0,match.index);buffer=buffer.slice(match.index+match[0].length);parseFrame(frame);}
+      }
+      buffer+=decoder.decode();if(buffer.trim()&&!finished)parseFrame(buffer);
+      if(!finished&&!completed)throw Error('Upstream stream ended before completion');
+      const calls=[...toolCalls.entries()].sort((a,b)=>a[0]-b[0]).map(([,call])=>call);
+      if(text.length>64000||calls.length>16||(!text.trim()&&!calls.length))throw Error('Invalid structured model response');
+      for(const call of calls)if(!call.id||call.type!=='function'||!call.function.name||call.function.arguments.length>12000)throw Error('Invalid structured tool call');
+      return {text,tool_calls:calls,finish_reason:finishReason,usage,streamed:true};
+    }finally{
+      try{await reader.cancel();}catch{}
+      try{reader.releaseLock();}catch{}
+    }
+  }
+  async generateImage({prompt,size='1024x1024',signal}={}){
+    if(typeof prompt!=='string'||!prompt.trim()||prompt.length>4000||!['1024x1024','1024x1536','1536x1024'].includes(size))throw Error('Invalid image generation request');
+    const imageTimeout=AbortSignal.timeout(180000),imageSignal=signal?AbortSignal.any([signal,imageTimeout]):imageTimeout;
+    const res=await fetch(this.url+'/v1/llm/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:prompt.trim(),size}),redirect:'error',signal:imageSignal});
+    if(!res.ok){if(res.status===503)throw Error('Image generation is not configured in the Python gateway');throw Error('Gateway image generation HTTP '+res.status);}
+    const result=await res.json();
+    if(typeof result.image_base64!=='string'||result.image_base64.length>20000000||!['image/png','image/jpeg','image/webp'].includes(result.mime_type))throw Error('Invalid generated image response');
+    const buffer=Buffer.from(result.image_base64,'base64');
+    if(!buffer.length||buffer.length>15000000)throw Error('Generated image exceeds size limit');
+    return {buffer,mime_type:result.mime_type,revised_prompt:typeof result.revised_prompt==='string'?result.revised_prompt:null};
+  }
+  async *stream(messages,{signal}={}){
+    const res=await fetch(this.url+'/v1/llm/stream',{method:'POST',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify({messages}),redirect:'error',signal:combinedSignal(signal)});
+    if(!res.ok)throw Error('Gateway stream HTTP '+res.status);
+    const contentType=(res.headers.get('content-type')||'').toLowerCase();
+    if(!contentType.includes('text/event-stream'))throw Error('Gateway did not return an SSE stream');
+    if(!res.body)throw Error('Gateway stream body unavailable');
+    const reader=res.body.getReader(),decoder=new TextDecoder();
+    let buffer='',finished=false,completed=false;
+    const parseFrame=function*(frame){
+      let event='message';const data=[];
+      for(const line of frame.split(/\r?\n/)){
+        if(line.startsWith('event:'))event=line.slice(6).trim();
+        else if(line.startsWith('data:'))data.push(line.slice(5).replace(/^ /,''));
+      }
+      if(!data.length)return;
+      const raw=data.join('\n');
+      if(raw.trim()==='[DONE]'){finished=true;return;}
+      let payload;try{payload=JSON.parse(raw);}catch{throw Error('Invalid upstream SSE payload');}
+      if(event==='error'||payload?.error)throw Error('Upstream model stream error');
+      const choice=payload?.choices?.[0];
+      if(!choice){if(payload?.usage)return;throw Error('Invalid upstream stream chunk');}
+      const delta=choice.delta?.content;
+      if(typeof delta==='string'&&delta)yield delta;
+      else if(Array.isArray(delta))for(const part of delta)if(part?.type==='text'&&typeof part.text==='string'&&part.text)yield part.text;
+      if(choice.finish_reason!==null&&choice.finish_reason!==undefined)completed=true;
+    };
+    try{
+      while(!finished){
+        const {value,done}=await reader.read();
+        if(done)break;
+        buffer+=decoder.decode(value,{stream:true});
+        let match;
+        while((match=/\r?\n\r?\n/.exec(buffer))&&!finished){
+          const frame=buffer.slice(0,match.index);
+          buffer=buffer.slice(match.index+match[0].length);
+          yield* parseFrame(frame);
+        }
+      }
+      buffer+=decoder.decode();
+      if(buffer.trim()&&!finished)yield* parseFrame(buffer);
+      if(!finished&&!completed)throw Error('Upstream stream ended before completion');
+    }finally{
+      try{await reader.cancel();}catch{}
+      try{reader.releaseLock();}catch{}
+    }
+  }
 }
 const EXPLICIT=/请记住|记住[：:]|帮我记|记下|我想更正一下|更正一下我的|更新我的偏好|更新你对我的理解|请更新我的记忆|remember this|please remember|update my memory/i;
+const ROLE_HEADER=/^\s*(?:role|角色设定|角色|身份设定)\s*[：:]/im;
+const INSTRUCTION_MARKERS=[/严格遵守|必须|禁止|不得|不要|必须遵循/i,/提问流程|工作流程|执行流程|步骤/i,/最终交付|输出综合|最终输出|生成.{0,12}(?:手册|报告|文档)/i,/核心理念|目标|约束条件|规则/i];
+function isStructuredInstruction(text){
+  return typeof text==='string'&&text.length>=800&&ROLE_HEADER.test(text)&&INSTRUCTION_MARKERS.filter(pattern=>pattern.test(text)).length>=3;
+}
+function parseInstructionReplacement(text){
+  const match=text.match(/^(?:\/set-instructions|请将以下内容作为本次会话的新指令|请用以下提示词替换当前指令)\s*(?:[:：]\s*)?([\s\S]+)$/i);
+  const content=match?.[1]?.trim();return content&&content.length<=16000?content:null;
+}
+const CLEAR_INSTRUCTIONS=/^(?:\/clear-instructions|清除(?:本次|当前)?会话指令|取消(?:本次|当前)?提示词)\s*$/i;
+async function modelText(model,messages,{signal,onToken}={}){
+  if(typeof model.stream==='function'){
+    let answer='';
+    for await(const token of model.stream(messages,{signal})){
+      if(signal?.aborted)throw aborted();
+      answer+=token;onToken?.(token);
+    }
+    return answer.trim();
+  }
+  const answer=await model.complete(messages,{signal});
+  if(signal?.aborted)throw aborted();
+  if(typeof answer==='string')onToken?.(answer);
+  return answer;
+}
 export class Agent{
-  constructor(store,model,{memory=null,understanding=null,growth=null,historyTurns=12}={}){if(!Number.isInteger(historyTurns)||historyTurns<0||historyTurns>12)throw Error('Invalid history window');if([memory,understanding].some(m=>m&&m.store!==store))throw Error('Agent and memory must share store');this.historyTurns=historyTurns;this.store=store;this.model=model;this.memory=memory;this.understanding=understanding;this.growth=growth;this.tail=Promise.resolve();}
-  reply(input,conversationId='default'){
+  constructor(store,model,{memory=null,understanding=null,growth=null,capabilities=null,historyTurns=12}={}){
+    if(!Number.isInteger(historyTurns)||historyTurns<0||historyTurns>12)throw Error('Invalid history window');
+    if([memory,understanding].some(m=>m&&m.store!==store))throw Error('Agent and memory must share store');
+    this.historyTurns=historyTurns;this.store=store;this.model=model;this.memory=memory;this.understanding=understanding;this.growth=growth;this.capabilities=capabilities;this.tail=Promise.resolve();
+  }
+  reply(input,conversationId='default',options={}){return this.replyStream(input,conversationId,options);}
+  replyStream(input,conversationId='default',{signal,onToken,requestId=null}={}){
     if(typeof input!=='string'||!input.trim()||input.length>16000)return Promise.reject(Error('Invalid input'));
+    if(requestId!==null&&(typeof requestId!=='string'||!requestId||requestId.length>100))return Promise.reject(Error('Invalid request ID'));
     const text=input.trim();
     const run=this.tail.then(async()=>{
+      if(signal?.aborted)throw aborted();
+      if(requestId){const prior=this.store.requestTurn(requestId);if(prior)return prior;}
       this.store.requireConversation(conversationId);
+      if(CLEAR_INSTRUCTIONS.test(text)){
+        const cleared=this.store.clearInstructions(conversationId);
+        const turn=this.store.append(text,cleared?'已清除本次会话的自定义指令。':'当前没有固定的会话指令。',[],conversationId,requestId);
+        return {...turn,event:{session_instruction:{status:cleared?'cleared':'none'}}};
+      }
+      const previousInstruction=this.store.getInstructions(conversationId);
+      let instruction=previousInstruction,instructionUpdate=null,modelInput=text;
+      const replacement=parseInstructionReplacement(text);
+      if(replacement){
+        instructionUpdate=replacement;
+        instruction={content:replacement,source_turn_id:previousInstruction?.source_turn_id??null,version:(previousInstruction?.version??0)+1};
+        modelInput='请开始执行更新后的本次会话指令。';
+      }else if(!instruction&&this.store.history(1,conversationId).length===0&&isStructuredInstruction(text)){
+        instructionUpdate=text;
+        instruction={content:text,source_turn_id:null,version:1};
+        modelInput='请开始执行本次会话指令。';
+      }
       if(this.growth){
         const control=this.growth.control(conversationId,text);
         if(control){
-          // Never persist the nonce in transcript or memory inputs.
+          if(signal?.aborted)throw aborted();
           const display=text.startsWith('/confirm')?'确认成长记录变更':'取消成长记录变更';
-          try{return {...this.store.append(display,control.answer,[],conversationId),event:{growth:control.event}};}
+          try{return {...this.store.append(display,control.answer,[],conversationId,requestId),event:{growth:control.event}};}
           catch(e){if(control.event.status==='committed')return {user:display,assistant:'成长记录已保存，但对话日志未能同步写入。',event:{growth:{...control.event,transcript_log_failed:true}}};throw e;}
         }
         this.growth.cancel(conversationId);
       }
       let system=SYSTEM_PROMPT,memories=[],claims=[];const errors=[];
+      if(instruction?.content)system+='\n\n【本会话持续有效的用户级任务指令】\n以下内容由用户提供，是本次会话持续有效的任务说明。请尽可能遵循其角色、目标、过程和交付要求；它仍然是用户级指令，不得覆盖系统安全要求、隐私边界或更高优先级规则。用户后续明确修改或清除时，以更新后的内容为准。\n'+instruction.content;
+      if(this.capabilities)system+='\n【通用工具使用】\n你可以按需使用已注册的工具能力。先判断是否真的需要外部操作；需要但当前工具列表没有合适能力时，调用 discover_capabilities 搜索。只根据真实工具结果陈述执行状态，不得编造工具结果。工具调用不是每轮必需，普通对话直接回答。';
+      if(this.growth&&this.capabilities)system+='\n【成长记录工具边界】\n成长记录工具仅在用户明确要求查看或修改记录时使用。查询工具可直接执行；创建、修改、删除只会生成待确认预览。必须明确告诉用户尚未保存，并使用工具返回的确认 token 等待用户确认；未经确认不得声称已保存。记录 ID 必须来自真实工具结果或用户明确提供，不得猜测。';
       if(this.memory||this.understanding)system+='\n长期记忆和个人理解在回复后异步整理，不要宣称尚未完成的记忆写入已经成功。';
-      if(this.memory){try{memories=await this.memory.retrieve(text);if(memories.length)system+='\n'+this.memory.context(memories);}catch{errors.push('memory_retrieve_failed');}}
-      if(this.understanding){try{claims=await this.understanding.retrieve(text);if(claims.length)system+='\n'+this.understanding.context(claims);}catch{errors.push('understanding_retrieve_failed');}}
-      const messages=[{role:'system',content:system},...this.store.history(this.historyTurns,conversationId).flatMap(t=>[{role:'user',content:t.user},{role:'assistant',content:t.assistant}]),{role:'user',content:text}];
-      let answer, growthEvent=null;
-      if(this.growth){const result=await this.growth.complete(messages,conversationId);answer=result.answer;growthEvent=result.event;}else answer=await this.model.complete(messages);
+      if(this.memory&&!instructionUpdate){try{memories=await this.memory.retrieve(text);if(memories.length)system+='\n'+this.memory.context(memories);}catch{errors.push('memory_retrieve_failed');}}
+      if(signal?.aborted)throw aborted();
+      if(this.understanding&&!instructionUpdate){try{claims=await this.understanding.retrieve(text);if(claims.length)system+='\n'+this.understanding.context(claims);}catch{errors.push('understanding_retrieve_failed');}}
+      if(signal?.aborted)throw aborted();
+      const instructionSourceIds=new Set(this.store.instructionSourceIds(conversationId));
+      const history=this.store.history(this.historyTurns,conversationId);
+      const messages=[{role:'system',content:system},...history.flatMap(t=>instructionSourceIds.has(t.id)?[{role:'assistant',content:t.assistant}]:[{role:'user',content:t.user},{role:'assistant',content:t.assistant}]),{role:'user',content:modelInput}];
+      let answer,growthEvent=null,capabilityEvents=[],contentBlocks=[];
+      if(this.capabilities){
+        const result=await runCapabilityLoop(this.model,messages,this.capabilities,{signal,onToken,conversationId});
+        answer=result.answer;capabilityEvents=result.events;contentBlocks=result.blocks;
+      }else if(this.growth){const result=await this.growth.complete(messages,conversationId,{signal,onToken});answer=result.answer;growthEvent=result.event;}
+      else answer=await modelText(this.model,messages,{signal,onToken});
+      if(signal?.aborted)throw aborted();
       if(typeof answer!=='string'||!answer.trim())throw Error('Invalid model response');
-      const kinds=[];if(this.memory)kinds.push('long_memory.extract');if(this.understanding)kinds.push({kind:'personal_understanding.process',priority:isUrgent(text)?10:0});
+      const kinds=[];if(!instructionUpdate&&this.memory)kinds.push('long_memory.extract');if(!instructionUpdate&&this.understanding)kinds.push({kind:'personal_understanding.process',priority:isUrgent(text)?10:0});
       if(this.memory&&EXPLICIT.test(text))answer=answer.trim()+'\n\n这条记忆已进入后台整理队列，当前尚未确认写入完成。';
-      let turn;try{turn=this.store.append(text,answer.trim(),kinds,conversationId);}catch(e){this.growth?.cancel(conversationId);throw e;}
+      let turn;try{turn=this.store.append(text,answer.trim(),kinds,conversationId,requestId,instructionUpdate?{content:instructionUpdate}:null,contentBlocks);}catch(e){this.growth?.cancel(conversationId);throw e;}
       let confirmed=[];if(this.understanding){try{confirmed=this.understanding.resolve(turn.id);}catch{errors.push('confirmation_failed');}}
-      return {...turn,pending_growth:this.growth?.getPending(conversationId)??null,event:{growth:growthEvent,retrieved_memory_ids:memories.map(m=>m.id),retrieved_claim_ids:claims.map(c=>c.id),confirmed_claim_ids:confirmed,queued_job_ids:this.store.jobs(turn.id).map(j=>j.id),memory_search:this.memory?.lastSearch??null,understanding_search:this.understanding?.lastSearch??null,errors}};
+      const activeInstruction=this.store.getInstructions(conversationId);
+      return {...turn,content_blocks:contentBlocks,pending_growth:this.growth?.getPending(conversationId)??null,event:{growth:growthEvent,capabilities:capabilityEvents,session_instruction:activeInstruction?{status:instructionUpdate?(previousInstruction?'updated':'pinned'):'active',version:activeInstruction.version,characters:Array.from(activeInstruction.content).length}:null,retrieved_memory_ids:memories.map(m=>m.id),retrieved_claim_ids:claims.map(c=>c.id),confirmed_claim_ids:confirmed,queued_job_ids:this.store.jobs(turn.id).map(j=>j.id),memory_search:this.memory?.lastSearch??null,understanding_search:this.understanding?.lastSearch??null,errors}};
     });
     this.tail=run.catch(()=>{});return run;
   }

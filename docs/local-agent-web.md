@@ -16,7 +16,7 @@ Terminal 2:
 
     npm --prefix agent-runtime start
 
-Open http://127.0.0.1:4310. Configure the provider only in Python. The Node gateway adapter receives text; usage returned by the provider is passed through without storing or calculating fees. Local SQLite defaults to data/agent-local.sqlite3 (new database, not an in-place migration of the Python schema). Web remains a plain conversation page with background status.
+Open http://127.0.0.1:4310. Configure the provider only in Python. The Node gateway adapter receives text; usage returned by the provider is passed through without storing or calculating fees. Local SQLite defaults to data/agent-local.sqlite3 (new database, not an in-place migration of the Python schema). The AI Friend Web V1 page uses one long conversation; see [AI Friend Web V1](ai-friend-web-v1.md) for UI and API details.
 
 ## Migration checkpoint
 
@@ -26,7 +26,7 @@ Open http://127.0.0.1:4310. Configure the provider only in Python. The Node gate
 - This checkpoint uses single-process/multi-conversation Node; previous prototype's sync code and server DB have been removed from the active runtime. Legacy Python packages/tests remain as behavioral references.
 - Tests: npm --prefix agent-runtime test; python -m pip install httpx; python -m unittest server.test_gateway -v; python server/smoke_local.py. HTTP smoke uses a local fake upstream provider, not paid inference.
 
-Existing growth tools are restored in the Node runtime using the original tool prompt and a separate local SQLite DB. Mutations require a session-bound, one-use confirmation; the simple browser page exposes confirm/cancel and conversation selection, not a new growth management UI. Conversation history is isolated; memory and understanding remain user-level. Pending confirmations do not survive process restart. This is not a migration of existing Python DB files.
+Existing growth tools are restored in the Node runtime using the original tool prompt and a separate local SQLite DB. Mutations require a session-bound, one-use confirmation; the simple browser page exposes confirm/cancel in the single long conversation, not a new growth management UI. Conversation history is isolated; memory and understanding remain user-level. Pending confirmations do not survive process restart. This is not a migration of existing Python DB files.
 
 Memory retrieval mode is explicit: BECOMING_MEMORY_MODE=lexical (original API default), semantic, historical, or improved. Historical mode includes date-filtered historical evidence and bounded diverse candidate selection. Improved mode includes conservative revision validation and multi-batch ranking; optional embedding forwarding uses BECOMING_ENABLE_EMBEDDINGS=1 on Node and BECOMING_EMBEDDING_MODEL on Python. No vectors are persisted. Python still owns only model forwarding, including optional embeddings; it has no agent or billing logic. 
 

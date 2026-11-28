@@ -1,14 +1,15 @@
 name: Node agent real-model acceptance
 on:
   push:
-    branches: [feat/local-agent-web]
-    paths: ['.github/workflows/node-agent-live.yml']
+    branches: [feat/local-agent-web, feat/ai-friend-web-v1]
+    paths: ['.github/workflows/node-agent-live.yml', 'evaluation/personal_understanding_cases.json']
+    # Updating this workflow explicitly opts into the long-session real-model evaluation.
   workflow_dispatch:
     inputs:
       suite:
         type: choice
-        options: [functional, longitudinal, scenarios, acceptance]
-        default: functional
+        options: [web-smoke, functional, longitudinal, scenarios, long-session, acceptance]
+        default: web-smoke
 permissions:
   contents: read
 concurrency:
@@ -16,9 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   live:
-    if: >-
-      github.ref == 'refs/heads/feat/local-agent-web' &&
-      (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'fix: enforce explicit tool invocation and guide understanding retries')
+    if: github.ref == 'refs/heads/feat/local-agent-web' || github.ref == 'refs/heads/feat/ai-friend-web-v1'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -38,7 +37,7 @@ jobs:
           BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
           BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
           BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
-          SUITE: ${{ inputs.suite || 'acceptance' }}
+          SUITE: ${{ inputs.suite || 'long-session' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -53,7 +52,11 @@ jobs:
             sleep .2
           done
           curl -fsS http://127.0.0.1:8000/health >/dev/null
-          if [[ "$SUITE" == acceptance ]]; then
+          if [[ "$SUITE" == web-smoke ]]; then
+            npm --prefix agent-runtime run test:web-smoke
+          elif [[ "$SUITE" == long-session ]]; then
+            BECOMING_EFFECT_MODE=long-session BECOMING_REPORT=artifacts/node-effects-long-session.json npm --prefix agent-runtime run evaluate:live
+          elif [[ "$SUITE" == acceptance ]]; then
             npm --prefix agent-runtime run test:live
             BECOMING_REPORT=artifacts/node-effects-scenarios.json BECOMING_EFFECT_MODE=scenarios npm --prefix agent-runtime run evaluate:live
             BECOMING_REPORT=artifacts/node-effects-longitudinal.json BECOMING_EFFECT_MODE=longitudinal npm --prefix agent-runtime run evaluate:live

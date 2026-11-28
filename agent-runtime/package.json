@@ -10,6 +10,8 @@
     "test": "node --test",
     "test:live": "node validation/live.mjs",
     "test:effects": "node validation/effects.mjs",
-    "evaluate:live": "node validation/effects.mjs --live"
+    "evaluate:live": "node validation/effects.mjs --live",
+    "test:web-smoke": "node validation/web-smoke.mjs",
+    "evaluate:meaning-design": "node validation/meaning-design-acceptance.mjs"
   }
 }
