@@ -24,6 +24,18 @@ export class Gateway{
     if(!res.ok)throw Error('Gateway HTTP '+res.status);
     const {text}=await res.json();if(typeof text!=='string'||!text.trim()||text.length>64000)throw Error('Invalid model response');return text.trim();
   }
+  async completeStructured(messages,{tools=[],tool_choice='auto',signal}={}){
+    if(!Array.isArray(messages)||!messages.length||!Array.isArray(tools)||tools.length>32)throw Error('Invalid structured completion request');
+    const res=await fetch(this.url+'/v1/llm/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages,tools,tool_choice}),redirect:'error',signal:combinedSignal(signal)});
+    if(!res.ok)throw Error('Gateway structured completion HTTP '+res.status);
+    const result=await res.json(),text=result.text,toolCalls=result.tool_calls??[];
+    if(typeof text!=='string'||text.length>64000||!Array.isArray(toolCalls)||toolCalls.length>16||(!text.trim()&&!toolCalls.length))throw Error('Invalid structured model response');
+    for(const call of toolCalls){
+      const fn=call?.function;
+      if(typeof call?.id!=='string'||call.type!=='function'||typeof fn?.name!=='string'||typeof fn?.arguments!=='string'||fn.arguments.length>12000)throw Error('Invalid structured tool call');
+    }
+    return {text:text.trim(),tool_calls:toolCalls,finish_reason:result.finish_reason??null,usage:result.usage??null};
+  }
   async *stream(messages,{signal}={}){
     const res=await fetch(this.url+'/v1/llm/stream',{method:'POST',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify({messages}),redirect:'error',signal:combinedSignal(signal)});
     if(!res.ok)throw Error('Gateway stream HTTP '+res.status);
