@@ -47,12 +47,12 @@ export class Gateway{
     let buffer='',text='',finished=false,completed=false,finishReason=null,usage=null;
     const parseFrame=frame=>{
       let event='message';const data=[];
-      for(const line of frame.split(/\\r?\\n/)){
+      for(const line of frame.split(/\r?\n/)){
         if(line.startsWith('event:'))event=line.slice(6).trim();
         else if(line.startsWith('data:'))data.push(line.slice(5).replace(/^ /,''));
       }
       if(!data.length)return;
-      const raw=data.join('\\n');
+      const raw=data.join('\n');
       if(raw.trim()==='[DONE]'){finished=true;return;}
       let payload;try{payload=JSON.parse(raw);}catch{throw Error('Invalid upstream SSE payload');}
       if(event==='error'||payload?.error)throw Error('Upstream model stream error');
@@ -77,7 +77,7 @@ export class Gateway{
       while(!finished){
         const {value,done}=await reader.read();if(done)break;
         buffer+=decoder.decode(value,{stream:true});let match;
-        while((match=/\\r?\\n\\r?\\n/.exec(buffer))&&!finished){const frame=buffer.slice(0,match.index);buffer=buffer.slice(match.index+match[0].length);parseFrame(frame);}
+        while((match=/\r?\n\r?\n/.exec(buffer))&&!finished){const frame=buffer.slice(0,match.index);buffer=buffer.slice(match.index+match[0].length);parseFrame(frame);}
       }
       buffer+=decoder.decode();if(buffer.trim()&&!finished)parseFrame(buffer);
       if(!finished&&!completed)throw Error('Upstream stream ended before completion');
