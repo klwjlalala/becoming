@@ -1,4 +1,5 @@
 const $ = id => document.getElementById(id);
+const welcomeNode = $('welcome');
 const state = {turns:[],before:null,hasMore:false,pendingGrowth:null,busy:false,controller:null,demo:false};
 
 function toast(message){
@@ -83,7 +84,7 @@ function renderTurn(turn,container,pending=null){
   container.append(group);return group;
 }
 function renderHistory(turns,{pending=null,highlightId=null,keepScroll=false}={}){
-  const history=$('history'),welcome=$('welcome'),oldHeight=history.scrollHeight,oldTop=history.scrollTop;
+  const history=$('history'),welcome=welcomeNode,oldHeight=history.scrollHeight,oldTop=history.scrollTop;
   history.replaceChildren();
   if(!turns.length){welcome.hidden=false;history.append(welcome);}
   else welcome.hidden=true;
@@ -154,7 +155,8 @@ async function consumeStream(response,onEvent){
   }finally{try{reader.releaseLock();}catch{}}
 }
 function createPendingGroup(text){
-  $('welcome').hidden=true;
+  welcomeNode.hidden=true;
+  if(!welcomeNode.isConnected)$('history').append(welcomeNode);
   const group=document.createElement('div');group.className='turn-group pending-group';
   const user=createMessage('user',text,null,new Date().toISOString());
   const assistant=createMessage('assistant','正在认真组织回复…',null,new Date().toISOString());
