@@ -59,7 +59,7 @@ createServer(async(req,res)=>{
     if(!/^[0-9a-f-]{36}$/i.test(id))return json(res,400,{error:'Invalid request ID'});
     return json(res,200,{turn:store.requestTurn(id)||null});
   }
-  if(req.method==='GET'&&p==='/api/status')return json(res,200,{jobs:store.jobCounts(),memoryEnabled:!!memory,conversationId:'default'});
+  if(req.method==='GET'&&p==='/api/status'){const instruction=store.getInstructions('default');return json(res,200,{jobs:store.jobCounts(),memoryEnabled:!!memory,conversationId:'default',sessionInstruction:instruction?{active:true,version:instruction.version,characters:Array.from(instruction.content).length}: {active:false}});}
   if(req.method==='GET'&&p==='/api/memories')return json(res,200,{memories:memory?.list()||[]});
   if(req.method==='GET'&&p==='/api/understanding')return json(res,200,{claims:understanding?.list()||[]});
   if(req.method==='GET'&&p==='/api/jobs')return json(res,200,{jobs:store.jobs()});
