@@ -1,4 +1,5 @@
 name: Node agent meaning-design acceptance
+# Keep prompt, artifact-lifecycle, and replay-analysis changes covered by live acceptance.
 on:
   push:
     branches:
