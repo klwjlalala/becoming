@@ -20,12 +20,18 @@ test('Web shell serves one long conversation with streamed chat and idempotent r
   const dir=mkdtempSync(join(tmpdir(),'becoming-web-'));
   const gatewayCalls={count:0};
   const gateway=createHttpServer((req,res)=>{
+    if(req.url==='/v1/llm/complete'){
+      gatewayCalls.count++;
+      res.writeHead(200,{'Content-Type':'application/json'});
+      res.end(JSON.stringify({text:'你好，这里是测试回复。',tool_calls:[],finish_reason:'stop'}));
+      return;
+    }
     if(req.url!=='/v1/llm/stream'){res.writeHead(404);res.end();return;}
     gatewayCalls.count++;
     res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-cache'});
     const chunks=['你好，','这里是测试回复。'];
-    for(const content of chunks)res.write('data: '+JSON.stringify({choices:[{delta:{content}}]})+'\n\n');
-    res.end('data: [DONE]\n\n');
+    for(const content of chunks)res.write('data: '+JSON.stringify({choices:[{delta:{content}}]})+'\\n\\n');
+    res.end('data: [DONE]\\n\\n');
   });
   await new Promise(resolve=>gateway.listen(0,'127.0.0.1',resolve));
   const gatewayPort=gateway.address().port,port=await freePort();
