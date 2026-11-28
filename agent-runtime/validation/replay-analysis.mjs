@@ -34,8 +34,10 @@ export function analyzeReplay(turns){
   const finalConfirmationQuestionPattern=/(?:你还有.{0,12}(?:补充|修正)|还有.{0,12}(?:补充|修正)|(?:补充|修正).{0,12}(?:吗[？?]|有没有|是否))/u;
   const finalConfirmationTurns=turns.filter(turn=>turn.kind==='replayed_user_turn'&&finalConfirmationQuestionPattern.test(String(turn.assistant||'')));
   const prematureFinalConfirmationTurns=finalConfirmationTurns.filter(turn=>turn.index!==latestSubstantiveUserTurn?.index).map(turn=>turn.index);
-  const finalConfirmationQuestionIntents=finalConfirmationResponse.match(/有没有|是否|谁|什么样|什么时候|哪个|哪位|为什么|怎么(?:样|做)?|你想不想|你希望|你想|能不能|可不可以|还有什么|还有没有|是否还有/gu)||[];
-  const asksStandaloneFinalConfirmation=finalConfirmationQuestionPattern.test(finalConfirmationResponse)&&finalConfirmationQuestionMarks===1&&finalConfirmationQuestionIntents.length===1&&!reasksKnownAge&&!/个人意义设计手册/.test(finalConfirmationResponse);
+  const finalConfirmationMatch=finalConfirmationResponse.match(finalConfirmationQuestionPattern);
+  const confirmationPrefix=finalConfirmationMatch?finalConfirmationResponse.slice(0,finalConfirmationMatch.index):finalConfirmationResponse;
+  const otherQuestionBeforeFinalConfirmation=/(?:有没有|是否|能不能|可不可以|要不要|你身边(?:有没有|有谁)|谁(?:适合|可以|能)|什么样(?:的)?(?:人|关系|生活)|哪个(?:人|方面)|什么时候)/u.test(confirmationPrefix);
+  const asksStandaloneFinalConfirmation=!!finalConfirmationMatch&&finalConfirmationQuestionMarks===1&&!otherQuestionBeforeFinalConfirmation&&!reasksKnownAge&&!/个人意义设计手册/.test(finalConfirmationResponse);
 
   const checks={
     personal_meaning_handbook_generated:{passed:!!handbookTurn,detail:{turn_index:handbookTurn?.index??null}},
@@ -48,7 +50,7 @@ export function analyzeReplay(turns){
     handbook_not_prematurely_delivered:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||!firstHandbookTurn||firstHandbookTurn.index===finalTurn.index||/(?:草稿|初稿|阶段性版本)/.test((firstHandbookTurn.assistant||'').slice(0,180)),detail:{first_handbook_turn_index:firstHandbookTurn?.index??null,final_turn_index:finalTurn?.index??null,final_turn_is_closure:isConversationClosure(finalTurn?.user),first_handbook_is_explicitly_draft:!!firstHandbookTurn&&/(?:草稿|初稿|阶段性版本)/.test((firstHandbookTurn.assistant||'').slice(0,180))}},
     known_age_was_not_reconfirmed:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||!reasksKnownAge,detail:{known_age_from_user:knownAge,reasks_known_age:reasksKnownAge,reasks_known_age_turn_indices:reasksKnownAgeTurns}},
     final_confirmation_not_asked_before_last_substantive_turn:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||prematureFinalConfirmationTurns.length===0,detail:{latest_substantive_user_turn_index:latestSubstantiveUserTurn?.index??null,final_confirmation_turn_indices:finalConfirmationTurns.map(turn=>turn.index),premature_confirmation_turn_indices:prematureFinalConfirmationTurns}},
-    standalone_final_confirmation_was_requested:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||asksStandaloneFinalConfirmation,detail:{latest_substantive_user_turn_index:latestSubstantiveUserTurn?.index??null,confirmation_question_marks:finalConfirmationQuestionMarks,question_intent_count:finalConfirmationQuestionIntents.length,contains_addition_question:finalConfirmationQuestionPattern.test(finalConfirmationResponse),known_age_from_user:knownAge,reasks_known_age:reasksKnownAge,response_excerpt:finalConfirmationResponse.slice(0,240)}},
+    standalone_final_confirmation_was_requested:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||asksStandaloneFinalConfirmation,detail:{latest_substantive_user_turn_index:latestSubstantiveUserTurn?.index??null,confirmation_question_marks:finalConfirmationQuestionMarks,other_question_before_final_confirmation:otherQuestionBeforeFinalConfirmation,contains_addition_question:finalConfirmationQuestionPattern.test(finalConfirmationResponse),known_age_from_user:knownAge,reasks_known_age:reasksKnownAge,response_excerpt:finalConfirmationResponse.slice(0,240)}},
     final_confirmation_was_requested_once_after_last_substantive_turn:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||(finalConfirmationTurns.length===1&&finalConfirmationTurns[0].index===latestSubstantiveUserTurn?.index),detail:{latest_substantive_user_turn_index:latestSubstantiveUserTurn?.index??null,final_confirmation_turn_indices:finalConfirmationTurns.map(turn=>turn.index)}}
   };
   return {
