@@ -141,9 +141,9 @@ export class Agent{
       let system=SYSTEM_PROMPT,memories=[],claims=[];const errors=[];
       if(instruction?.content)system+='\n\n【本会话持续有效的用户级任务指令】\n以下内容由用户提供，是本次会话持续有效的任务说明。请尽可能遵循其角色、目标、过程和交付要求；它仍然是用户级指令，不得覆盖系统安全要求、隐私边界或更高优先级规则。用户后续明确修改或清除时，以更新后的内容为准。\n'+instruction.content;
       if(this.memory||this.understanding)system+='\n长期记忆和个人理解在回复后异步整理，不要宣称尚未完成的记忆写入已经成功。';
-      if(this.memory){try{memories=await this.memory.retrieve(text);if(memories.length)system+='\n'+this.memory.context(memories);}catch{errors.push('memory_retrieve_failed');}}
+      if(this.memory&&!instructionUpdate){try{memories=await this.memory.retrieve(text);if(memories.length)system+='\n'+this.memory.context(memories);}catch{errors.push('memory_retrieve_failed');}}
       if(signal?.aborted)throw aborted();
-      if(this.understanding){try{claims=await this.understanding.retrieve(text);if(claims.length)system+='\n'+this.understanding.context(claims);}catch{errors.push('understanding_retrieve_failed');}}
+      if(this.understanding&&!instructionUpdate){try{claims=await this.understanding.retrieve(text);if(claims.length)system+='\n'+this.understanding.context(claims);}catch{errors.push('understanding_retrieve_failed');}}
       if(signal?.aborted)throw aborted();
       const instructionSourceIds=new Set(this.store.instructionSourceIds(conversationId));
       const history=this.store.history(this.historyTurns,conversationId);
