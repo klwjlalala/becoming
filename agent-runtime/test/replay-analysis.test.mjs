@@ -42,19 +42,38 @@ test('replay analysis checks the latest handbook rather than the final conversat
   assert.equal(result.checks.handbook_generated_after_closure_signal.passed,false);
   assert.equal(result.checks.handbook_not_prematurely_delivered.passed,false);
   assert.equal(result.checks.standalone_final_confirmation_was_requested.passed,false);
+  assert.equal(result.checks.known_age_was_not_reconfirmed.passed,true);
   assert.equal(result.first_handbook_turn_index,2);
 });
 
-test('replay analysis passes when the handbook follows the final substantive user input',()=>{
+test('a no-more-additions reply completes the final check without repeating known facts',()=>{
   const turns=[
     {index:0,kind:'initial_instruction',assistant:'开始探索'},
-    {index:1,kind:'replayed_user_turn',user:'我的生活目标',assistant:'还有什么想补充或修正的吗？'},
-    {index:2,kind:'replayed_user_turn',user:'没有了',assistant:handbook}
+    {index:1,kind:'replayed_user_turn',user:'我今年28岁。',assistant:'明白，我会按28岁来理解。'},
+    {index:2,kind:'replayed_user_turn',user:'我的生活目标',assistant:'还有什么想补充或修正的吗？'},
+    {index:3,kind:'replayed_user_turn',user:'没有了',assistant:handbook}
   ];
   const result=analyzeReplay(turns);
+  assert.equal(result.known_age_from_user,true);
+  assert.equal(result.reasks_known_age,false);
+  assert.equal(result.checks.known_age_was_not_reconfirmed.passed,true);
   assert.equal(result.checks.handbook_generated_after_last_substantive_user_turn.passed,true);
   assert.equal(result.checks.handbook_generated_after_closure_signal.passed,true);
   assert.equal(result.checks.handbook_not_prematurely_delivered.passed,true);
   assert.equal(result.checks.standalone_final_confirmation_was_requested.passed,true);
   assert.equal(result.final_turn_is_closure,true);
+});
+
+test('replay analysis rejects combining a known-age reconfirmation with the final additions check',()=>{
+  const turns=[
+    {index:0,kind:'initial_instruction',assistant:'开始探索'},
+    {index:1,kind:'replayed_user_turn',user:'我今年28岁。',assistant:'明白。'},
+    {index:2,kind:'replayed_user_turn',user:'我的生活目标',assistant:'你现在是28岁，对吗？还有没有什么想补充的？'},
+    {index:3,kind:'replayed_user_turn',user:'没有了',assistant:handbook}
+  ];
+  const result=analyzeReplay(turns);
+  assert.equal(result.known_age_from_user,true);
+  assert.equal(result.reasks_known_age,true);
+  assert.equal(result.checks.known_age_was_not_reconfirmed.passed,false);
+  assert.equal(result.checks.standalone_final_confirmation_was_requested.passed,false);
 });
