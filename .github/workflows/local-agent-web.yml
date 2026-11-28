@@ -16,7 +16,9 @@ jobs:
         with:
           node-version: '22'
       - run: python -m pip install -e . httpx
-      - run: node --check web/app.js\n      - run: node --check agent-runtime/server.mjs\n      - run: npm --prefix agent-runtime test
+      - run: node --check web/app.js
+      - run: node --check agent-runtime/server.mjs
+      - run: npm --prefix agent-runtime test
       - run: npm --prefix agent-runtime run test:effects
       - run: python -m unittest server.test_gateway -v
       - run: python server/smoke_local.py
