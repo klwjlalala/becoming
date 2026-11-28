@@ -153,6 +153,8 @@ export class Agent{
       }
       let system=SYSTEM_PROMPT,memories=[],claims=[];const errors=[];
       if(instruction?.content)system+='\n\n【本会话持续有效的用户级任务指令】\n以下内容由用户提供，是本次会话持续有效的任务说明。请尽可能遵循其角色、目标、过程和交付要求；它仍然是用户级指令，不得覆盖系统安全要求、隐私边界或更高优先级规则。用户后续明确修改或清除时，以更新后的内容为准。\n'+instruction.content;
+      if(this.capabilities)system+='\n【通用工具使用】\n你可以按需使用已注册的工具能力。先判断是否真的需要外部操作；需要但当前工具列表没有合适能力时，调用 discover_capabilities 搜索。只根据真实工具结果陈述执行状态，不得编造工具结果。工具调用不是每轮必需，普通对话直接回答。';
+      if(this.growth&&this.capabilities)system+='\n【成长记录工具边界】\n成长记录工具仅在用户明确要求查看或修改记录时使用。查询工具可直接执行；创建、修改、删除只会生成待确认预览。必须明确告诉用户尚未保存，并使用工具返回的确认 token 等待用户确认；未经确认不得声称已保存。记录 ID 必须来自真实工具结果或用户明确提供，不得猜测。';
       if(this.memory||this.understanding)system+='\n长期记忆和个人理解在回复后异步整理，不要宣称尚未完成的记忆写入已经成功。';
       if(this.memory&&!instructionUpdate){try{memories=await this.memory.retrieve(text);if(memories.length)system+='\n'+this.memory.context(memories);}catch{errors.push('memory_retrieve_failed');}}
       if(signal?.aborted)throw aborted();
@@ -162,11 +164,11 @@ export class Agent{
       const history=this.store.history(this.historyTurns,conversationId);
       const messages=[{role:'system',content:system},...history.flatMap(t=>instructionSourceIds.has(t.id)?[{role:'assistant',content:t.assistant}]:[{role:'user',content:t.user},{role:'assistant',content:t.assistant}]),{role:'user',content:modelInput}];
       let answer,growthEvent=null,capabilityEvents=[],contentBlocks=[];
-      if(this.growth){const result=await this.growth.complete(messages,conversationId,{signal,onToken});answer=result.answer;growthEvent=result.event;}
-      else if(this.capabilities){
+      if(this.capabilities){
         const result=await runCapabilityLoop(this.model,messages,this.capabilities,{signal,onToken,conversationId});
         answer=result.answer;capabilityEvents=result.events;contentBlocks=result.blocks;
-      }else answer=await modelText(this.model,messages,{signal,onToken});
+      }else if(this.growth){const result=await this.growth.complete(messages,conversationId,{signal,onToken});answer=result.answer;growthEvent=result.event;}
+      else answer=await modelText(this.model,messages,{signal,onToken});
       if(signal?.aborted)throw aborted();
       if(typeof answer!=='string'||!answer.trim())throw Error('Invalid model response');
       const kinds=[];if(!instructionUpdate&&this.memory)kinds.push('long_memory.extract');if(!instructionUpdate&&this.understanding)kinds.push({kind:'personal_understanding.process',priority:isUrgent(text)?10:0});
