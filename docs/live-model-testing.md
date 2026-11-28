@@ -12,11 +12,20 @@
 
 不要将真实密钥放入代码、提交、Issue 或 workflow_dispatch 输入。公开仓库的 Actions 日志可能公开可见。
 
+## Web 流式联调（建议先执行）
+
+开发分支 `feat/ai-friend-web-v1` 提供一次性 `web-smoke` 测试：只发送一条虚构的中文测试消息，验证 Python 网关 → Node Gateway SSE 解析 → Agent 流式回调 → SQLite 完整落盘。默认只调用一次真实模型，不开启记忆整理、个人理解或成长工具，也不会在日志中输出模型回复正文。
+
+1. 打开仓库 Actions 页面，选择 **Node agent real-model acceptance**。
+2. 选择分支 `feat/ai-friend-web-v1`。
+3. Suite 选择 `web-smoke`（默认选项），点击 Run workflow。
+4. 检查 `real-model-web-stream` 结果。
+
+此流程需要上述三个 Repository secrets 已配置。它只验证接口与流式链路，不评价回答质量。
+
 ## 执行
 
-1. 打开仓库 Actions 页面，选择 Live model smoke test。
-2. 点击 Run workflow，选择 main，然后再次点击 Run workflow。
-3. 查看 Offline regression tests 与 Live model functional integration 两个 job。
+完整 Python 功能测试仍使用 `Live model smoke test`，只在 `main` 分支手动触发。Node Agent 的更完整真实模型测试使用 `Node agent real-model acceptance`，可在 `feat/local-agent-web` 或 `feat/ai-friend-web-v1` 手动触发。
 
 仅手动触发，不在 push、PR 或定时事件中调用真实模型。离线测试失败时不启动真实模型 job；真实模型 job 仅允许 main 分支执行。目前唯一的 live_smoke.py 成功运行时发出三次模型请求；后续新增 live_*.py 能力用例后调用次数将增加，执行前应确认预算。现有冒烟测试使用虚构随机代号及临时 SQLite 数据库，不上传对话产物。日志记录耗时、回复长度与测试结果，不主动输出凭据。工作流串行运行，设有超时。
 

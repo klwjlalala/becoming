@@ -1,4 +1,4 @@
-> **Node migration branch:** [Current scope and startup](docs/local-agent-web.md). Python is a stateless LLM gateway; Node owns the agent. The historical Python documentation below is a reference only.
+> **AI Friend Web V1:** Run the Python model gateway and `npm --prefix agent-runtime start`; see [docs/ai-friend-web-v1.md](docs/ai-friend-web-v1.md).\n\n> **Node migration branch:** [Current scope and startup](docs/local-agent-web.md). Python is a stateless LLM gateway; Node owns the agent. The historical Python documentation below is a reference only.
 
 # Becoming
 
@@ -27,9 +27,9 @@ Demo 为固定的模拟模型，不具有真实 AI 理解能力，也不会发�
 
 `python -m becoming --growth --long-memory --comprehensive-memory --personal-understanding` 可在同一对话入口组合长期记忆、动态个人理解、自我探索引导与成长工具。成长数据默认存于 `data/growth.sqlite3`，对话及长期记忆存于 `data/conversations.sqlite3`，可分别用 `--db` 和 `--growth-db` 指定，两个文件不能相同。`/confirm <token>` 确认变更，`/cancel` 取消，`/clear-growth` 后按提示二次确认清除成长记录。`/clear` 只清除对话及关联长期记忆，不删除独立成长记录。删除成长记录不会清除对话或长期记忆中的副本；删除对话也不会删除成长记录。SQLite 逻辑删除不保证物理擦除。
 
-## 无页面后端 API（API First）
+## 旧版 Python HTTP API（历史参考）
 
-当前产品化阶段先不开发 Web/Electron 页面，直接运行独立 HTTP 服务，后续 Electron 桌面端复用同一套 API。
+以下内容描述旧版 Python API，不是当前 AI 好友 Web 页面的启动方式。当前页面启动方式见上方说明和 [AI 好友 Web V1](docs/ai-friend-web-v1.md)。
 
 ```bash
 python -m pip install -e .
@@ -93,7 +93,7 @@ PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前
 
 ## 开发原则
 
-以理解人、帮助人而非任务完成率为核心。用户拥有对自己的最终解释权。区分原始信息与推断；不进行未经验证的心理诊断，不制造依赖；后续记忆与认知机制需支持纠正和删除。暂不引入前端、向量数据库、Agent 框架或多智能体。
+以理解人、帮助人而非任务完成率为核心。用户拥有对自己的最终解释权。区分原始信息与推断；不进行未经验证的心理诊断，不制造依赖；后续记忆与认知机制需支持纠正和删除。当前 Web 页面保持为轻量交互层；暂不引入向量数据库、Agent 框架或多智能体。
 
 ## 长期记忆 V1（实验、默认关闭）
 

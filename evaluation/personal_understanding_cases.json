@@ -181,8 +181,12 @@
     {
       "day": "2025-08-19",
       "text": "我可能不想再做这个小工具了，最近维护它有点消耗。",
-      "no_write": true,
-      "evidence": []
+      "evidence": [
+        {
+          "label": "project_maintenance_fatigue",
+          "quote": "我可能不想再做这个小工具了，最近维护它有点消耗。"
+        }
+      ]
     },
     {
       "day": "2025-09-12",

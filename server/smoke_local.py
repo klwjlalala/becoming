@@ -1,4 +1,4 @@
-"""Run actual HTTP gateway and Node runtime against a local fake provider."""
+"""Run the actual Python SSE gateway and Node Web runtime against a local fake provider."""
 import json
 import os
 import socket
@@ -7,12 +7,13 @@ import sys
 import tempfile
 import threading
 import time
-from pathlib import Path
-from urllib.request import Request,urlopen
+import uuid
 from contextlib import ExitStack
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+from urllib.request import Request,urlopen
 
-ROOT=Path(__file__).resolve().parents[1]
+ROOT=__import__("pathlib").Path(__file__).resolve().parents[1]
+
 class Provider(BaseHTTPRequestHandler):
     def do_POST(self):
         payload=json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -23,15 +24,24 @@ class Provider(BaseHTTPRequestHandler):
             text=json.dumps([{"key":"职业","category":"fact","quote":user,"replaces":None}],ensure_ascii=False)
         if "你是个人理解更新引擎" in system:
             text=json.dumps({"evidence":[],"operations":[],"confirmation":None})
+        if payload.get("stream"):
+            self.send_response(200);self.send_header("Content-Type","text/event-stream");self.end_headers()
+            chunk=json.dumps({"choices":[{"delta":{"content":text}}]},ensure_ascii=False).encode()
+            self.wfile.write(b"data: "+chunk+b"\n\n")
+            self.wfile.write(b"data: [DONE]\n\n")
+            return
         body=json.dumps({"choices":[{"message":{"content":text}}]}).encode()
         self.send_response(200);self.send_header("Content-Type","application/json");self.end_headers();self.wfile.write(body)
+
 def port():
     with socket.socket() as s:
         s.bind(("127.0.0.1",0));return s.getsockname()[1]
+
 def get(url,data=None,headers=None):
     h=dict(headers or {})
     if data is not None:h["Content-Type"]="application/json"
     with urlopen(Request(url,data=None if data is None else json.dumps(data).encode(),headers=h),timeout=10) as r:return r.read()
+
 def wait(fn):
     for _ in range(100):
         try:
@@ -39,11 +49,20 @@ def wait(fn):
         except (OSError,ValueError):pass
         time.sleep(.2)
     raise AssertionError("Service/state not ready")
-def stop(p):
-    if p.poll() is None:
-        p.terminate()
-        try:p.wait(timeout=5)
-        except subprocess.TimeoutExpired:p.kill();p.wait()
+
+def stop(process):
+    if process.poll() is None:
+        process.terminate()
+        try:process.wait(timeout=5)
+        except subprocess.TimeoutExpired:process.kill();process.wait()
+
+def parse_done(stream):
+    current=None
+    for line in stream.decode().splitlines():
+        if line.startswith("event:"):current=line[6:].strip()
+        elif line.startswith("data:") and current=="done":return json.loads(line[5:])["turn"]
+    raise AssertionError("SSE stream did not contain a completed turn")
+
 def main():
     with tempfile.TemporaryDirectory() as temp,ExitStack() as stack:
         provider=ThreadingHTTPServer(("127.0.0.1",0),Provider)
@@ -54,17 +73,22 @@ def main():
         gateway=f"http://127.0.0.1:{gp}";local=f"http://127.0.0.1:{lp}"
         env={**os.environ,"BECOMING_BASE_URL":f"http://127.0.0.1:{provider.server_port}/v1","BECOMING_API_KEY":"fake","BECOMING_MODEL":"fake","BECOMING_LOCAL_DB":temp+"/agent.db","BECOMING_GATEWAY":gateway,"BECOMING_LOCAL_PORT":str(lp),"BECOMING_ENABLE_LONG_MEMORY":"1"}
         def launch(args):
-            p=subprocess.Popen(args,cwd=ROOT,env=env);stack.callback(stop,p);return p
+            process=subprocess.Popen(args,cwd=ROOT,env=env);stack.callback(stop,process);return process
         launch([sys.executable,"-m","uvicorn","server.app:app","--host","127.0.0.1","--port",str(gp)])
         wait(lambda:get(gateway+"/health"))
         runtime=launch(["node","agent-runtime/server.mjs"]);wait(lambda:get(local+"/api/status"))
-        assert b"Agent Lab" in get(local+"/")
-        turn=json.loads(get(local+"/api/chat",{"text":"我的职业是教师"},{"Origin":local}))["turn"]
+        assert "AI 好友".encode() in get(local+"/")
+        assert b"api/chat/stream" in get(local+"/app.js")
+        request_id=str(uuid.uuid4())
+        stream=get(local+"/api/chat/stream",{"text":"我的职业是教师","request_id":request_id},{"Origin":local})
+        assert b"event: token" in stream and b"event: done" in stream
+        turn=parse_done(stream)
         assert turn["assistant"]=="测试回复"
         wait(lambda:json.loads(get(local+"/api/memories"))["memories"])
         assert json.loads(get(local+"/api/memories"))["memories"][0]["quote"]=="我的职业是教师"
         stop(runtime);launch(["node","agent-runtime/server.mjs"]);wait(lambda:get(local+"/api/status"))
         assert json.loads(get(local+"/api/history"))["turns"][0]["id"]==turn["id"]
         assert len(json.loads(get(local+"/api/memories"))["memories"])==1
-        print("Gateway / runtime / memory / browser / restart: OK")
+        print("Python SSE gateway / Node Agent / Web UI / memory / restart: OK")
+
 if __name__=="__main__":main()
