@@ -10,7 +10,7 @@ import {analyzeReplay} from './replay-analysis.mjs';
 const fixture=JSON.parse(readFileSync(new URL('./fixtures/meaning-design-dialogue.json',import.meta.url),'utf8'));
 const prompt=readFileSync(new URL('./fixtures/meaning-design-prompt.txt',import.meta.url),'utf8').trim();
 const maxCalls=Number(process.env.MEANING_DESIGN_MAX_CALLS||24);
-if(!Number.isInteger(maxCalls)||maxCalls<13||maxCalls>40)throw Error('Invalid meaning-design model-call budget');
+if(!Number.isInteger(maxCalls)||maxCalls<15||maxCalls>40)throw Error('Meaning-design evaluation requires a model-call budget from 15 to 40');
 const output=resolve(process.env.MEANING_DESIGN_REPORT||'artifacts/meaning-design-agent-acceptance.json');
 const assetDir=resolve(process.env.BECOMING_ASSET_DIR||dirname(output)+'/meaning-design-assets');
 
@@ -147,9 +147,13 @@ try{
   report.artifact_revision={
     conversation_id:revisionConversation,
     initial_request:revisionRequest,
+    initial_draft:revisionDraft.assistant||'',
+    initial_draft_turn_id:revisionDraft.id,
     initial_draft_characters:Array.from(revisionDraft.assistant||'').length,
     follow_up:revisionInput,
     updated_response:revisedPlan,
+    updated_turn_id:revisionTurn.id,
+    updated_turn_event:revisionTurn.event,
     checks:revisionChecks
   };
   for(const [name,result] of Object.entries(revisionChecks))check('artifact_revision_'+name,result.passed,result.detail??null);
