@@ -62,8 +62,8 @@ export function registerDefaultCapabilities({registry,growth,gateway,assetStore,
         required:['prompt'],
         additionalProperties:false
       },
-      handler:async args=>{
-        const generated=await gateway.generateImage({prompt:args.prompt,size:args.size||'1024x1024'});
+      handler:async (args,{signal}={})=>{
+        const generated=await gateway.generateImage({prompt:args.prompt,size:args.size||'1024x1024',signal});
         const asset=assetStore.save(generated.buffer,generated.mime_type);
         return {asset_id:asset.id,mime_type:asset.mime_type,blocks:[{type:'image',asset_id:asset.id,alt:args.alt||'AI 生成的辅助图片',caption:args.caption||generated.revised_prompt||''}]};
       }
