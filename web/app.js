@@ -164,14 +164,15 @@ function createPendingGroup(text){
   group.append(user.row,assistant.row);$('history').append(group);$('history').scrollTop=$('history').scrollHeight;
   return {group,assistant};
 }
-function addRetry(assistant,text,requestId,group){
-  assistant.actions.replaceChildren();assistant.meta.querySelector('.message-time').textContent='回复未完成';
+function addRetry(assistant,text,requestId,group,statusLabel){
+  assistant.actions.replaceChildren();assistant.meta.querySelector('.message-time').textContent=statusLabel;
   assistant.actions.append(makeButton('重试','message-action retry-action',()=>runRequest(text,requestId,group,assistant)));
 }
 async function runRequest(text,requestId,group,assistant){
   if(state.busy)return;
   state.busy=true;state.controller=new AbortController();
   $('send-button').hidden=true;$('stop-button').hidden=false;$('message').disabled=true;
+  group.querySelector('.stream-interruption')?.remove();
   assistant.bubble.textContent='';assistant.bubble.classList.add('streaming-placeholder');
   assistant.meta.querySelector('.message-time').textContent='正在回复';
   try{
@@ -192,8 +193,12 @@ async function runRequest(text,requestId,group,assistant){
       assistant.bubble.classList.remove('streaming-placeholder');
       const stopped=error?.name==='AbortError';
       if(!assistant.bubble.textContent)assistant.bubble.textContent=stopped?'已停止回复，本轮内容未保存。':'这次没有成功获取回复。';
-      assistant.meta.querySelector('.message-time').textContent=stopped?'已停止':'发送失败';
-      addRetry(assistant,text,requestId,group);
+      else{
+        const notice=document.createElement('div');notice.className='stream-interruption';
+        notice.textContent=stopped?'回复已停止，以上内容未保存。':'回复中断，以上内容未保存。';
+        assistant.bubble.after(notice);
+      }
+      addRetry(assistant,text,requestId,group,stopped?'已停止 · 未保存':'发送失败 · 未保存');
       toast(stopped?'已停止生成':error.message);
     }
   }finally{

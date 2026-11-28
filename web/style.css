@@ -71,6 +71,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px soli
 .message-row.user .message-meta{flex-direction:row-reverse}.message-name{font-weight:650;color:var(--muted)}
 .message-bubble{max-width:100%;padding:13px 16px;border:1px solid var(--line);border-radius:4px 17px 17px 17px;background:var(--surface);box-shadow:0 3px 12px rgba(45,37,58,.025);font-size:13px;line-height:1.85;white-space:pre-wrap;overflow-wrap:anywhere}
 .message-row.user .message-bubble{border-color:transparent;border-radius:17px 4px 17px 17px;background:var(--user);box-shadow:none}
+ .stream-interruption{padding:2px 3px;color:var(--danger);font-size:10px;line-height:1.5}
 .message-actions{min-height:17px;display:flex;gap:6px;padding-left:2px;opacity:.2;transition:opacity .18s}
 .message-row:hover .message-actions,.message-actions:focus-within{opacity:1}
 .message-action{border:0;background:transparent;color:var(--muted);font-size:10px;padding:2px 5px;cursor:pointer}

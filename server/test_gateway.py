@@ -28,7 +28,8 @@ class GatewayTest(unittest.TestCase):
     @patch("server.app.build_opener")
     def test_stream_forward(self,opener):
         response=MagicMock()
-        response.readline.side_effect=[b'data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\\n',b'\\n',b'data: [DONE]\\n',b'\\n',b'']
+        response.headers.get_content_type.return_value="text/event-stream"
+        response.readline.side_effect=[b'data: {"choices":[{"delta":{"content":"hello"}}]}\n',b'\n',b'data: [DONE]\n',b'\n',b'']
         opener.return_value.open.return_value=response
         with TestClient(app) as client:
             result=client.post("/v1/llm/stream",json={"messages":[{"role":"user","content":"hi"}]})
@@ -36,4 +37,14 @@ class GatewayTest(unittest.TestCase):
         self.assertIn('"content":"hello"',result.text)
         req=opener.return_value.open.call_args.args[0]
         self.assertEqual(json.loads(req.data),{"model":"test-model","messages":[{"role":"user","content":"hi"}],"stream":True})
+        response.close.assert_called_once()
+    @patch.dict(os.environ,{"BECOMING_BASE_URL":"http://127.0.0.1:9999/v1","BECOMING_API_KEY":"test-only","BECOMING_MODEL":"test-model"})
+    @patch("server.app.build_opener")
+    def test_stream_rejects_non_sse_upstream(self,opener):
+        response=MagicMock()
+        response.headers.get_content_type.return_value="application/json"
+        opener.return_value.open.return_value=response
+        with TestClient(app) as client:
+            result=client.post("/v1/llm/stream",json={"messages":[{"role":"user","content":"hi"}]})
+        self.assertEqual(result.status_code,502)
         response.close.assert_called_once()

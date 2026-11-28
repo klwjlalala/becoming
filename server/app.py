@@ -58,6 +58,9 @@ def llm_stream(request: Completion):
         payload={"model":model,"messages":[m.model_dump() for m in request.messages],"stream":True}
         req=Request(base.rstrip("/")+"/chat/completions",data=json.dumps(payload).encode(),headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","Accept":"text/event-stream"},method="POST")
         upstream=build_opener(NoRedirect()).open(req,timeout=90)
+        if upstream.headers.get_content_type()!="text/event-stream":
+            upstream.close()
+            raise HTTPException(502,"Upstream did not return an SSE stream")
         def chunks():
             try:
                 while True:

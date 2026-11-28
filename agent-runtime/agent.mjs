@@ -27,16 +27,28 @@ export class Gateway{
   async *stream(messages,{signal}={}){
     const res=await fetch(this.url+'/v1/llm/stream',{method:'POST',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify({messages}),redirect:'error',signal:combinedSignal(signal)});
     if(!res.ok)throw Error('Gateway stream HTTP '+res.status);
+    const contentType=(res.headers.get('content-type')||'').toLowerCase();
+    if(!contentType.includes('text/event-stream'))throw Error('Gateway did not return an SSE stream');
     if(!res.body)throw Error('Gateway stream body unavailable');
     const reader=res.body.getReader(),decoder=new TextDecoder();
-    let buffer='',finished=false;
+    let buffer='',finished=false,completed=false;
     const parseFrame=function*(frame){
-      const data=frame.split(/\r?\n/).filter(line=>line.startsWith('data:')).map(line=>line.slice(5).replace(/^ /,'')).join('\n');
-      if(!data)return;
-      if(data.trim()==='[DONE]'){finished=true;return;}
-      let payload;try{payload=JSON.parse(data);}catch{return;}
-      const delta=payload?.choices?.[0]?.delta?.content;
+      let event='message';const data=[];
+      for(const line of frame.split(/\r?\n/)){
+        if(line.startsWith('event:'))event=line.slice(6).trim();
+        else if(line.startsWith('data:'))data.push(line.slice(5).replace(/^ /,''));
+      }
+      if(!data.length)return;
+      const raw=data.join('\n');
+      if(raw.trim()==='[DONE]'){finished=true;return;}
+      let payload;try{payload=JSON.parse(raw);}catch{throw Error('Invalid upstream SSE payload');}
+      if(event==='error'||payload?.error)throw Error('Upstream model stream error');
+      const choice=payload?.choices?.[0];
+      if(!choice){if(payload?.usage)return;throw Error('Invalid upstream stream chunk');}
+      const delta=choice.delta?.content;
       if(typeof delta==='string'&&delta)yield delta;
+      else if(Array.isArray(delta))for(const part of delta)if(part?.type==='text'&&typeof part.text==='string'&&part.text)yield part.text;
+      if(choice.finish_reason!==null&&choice.finish_reason!==undefined)completed=true;
     };
     try{
       while(!finished){
@@ -52,11 +64,12 @@ export class Gateway{
       }
       buffer+=decoder.decode();
       if(buffer.trim()&&!finished)yield* parseFrame(buffer);
+      if(!finished&&!completed)throw Error('Upstream stream ended before completion');
     }finally{
+      try{await reader.cancel();}catch{}
       try{reader.releaseLock();}catch{}
     }
-  }
-}
+  }}
 const EXPLICIT=/请记住|记住[：:]|帮我记|记下|我想更正一下|更正一下我的|更新我的偏好|更新你对我的理解|请更新我的记忆|remember this|please remember|update my memory/i;
 async function modelText(model,messages,{signal,onToken}={}){
   if(typeof model.stream==='function'){
