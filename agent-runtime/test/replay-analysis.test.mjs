@@ -39,6 +39,8 @@ test('replay analysis checks the latest handbook rather than the final conversat
   assert.equal(result.checks.personal_meaning_handbook_generated.passed,true);
   assert.equal(result.checks.handbook_covers_all_eight_named_sections.passed,true);
   assert.equal(result.checks.handbook_generated_after_last_substantive_user_turn.passed,false);
+  assert.equal(result.checks.handbook_generated_after_closure_signal.passed,false);
+  assert.equal(result.first_handbook_turn_index,2);
 });
 
 test('replay analysis passes when the handbook follows the final substantive user input',()=>{
@@ -49,5 +51,6 @@ test('replay analysis passes when the handbook follows the final substantive use
   ];
   const result=analyzeReplay(turns);
   assert.equal(result.checks.handbook_generated_after_last_substantive_user_turn.passed,true);
+  assert.equal(result.checks.handbook_generated_after_closure_signal.passed,true);
   assert.equal(result.final_turn_is_closure,true);
 });
