@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {setTimeout as delay} from 'node:timers/promises';
-import {Gateway} from '../agent.mjs';
+import {Agent,Gateway} from '../agent.mjs';
+import {Store} from '../store.mjs';
 
 async function withServer(handler,run){
   const server=createServer(handler);
@@ -78,4 +79,18 @@ test('Gateway stream cancellation propagates to the reader',async()=>{
     controller.abort();
     await assert.rejects(()=>stream.next(),error=>error.name==='AbortError');
   });
+});
+
+test('Agent never persists partial text after an upstream SSE error',async()=>{
+  const store=new Store(':memory:');
+  try{
+    await withServer((_req,res)=>{
+      res.writeHead(200,{'Content-Type':'text/event-stream','Connection':'close'});
+      res.end(chunk('这是一段未完成的回复')+'event: error\ndata: {"error":{"message":"provider failed"}}\n\n');
+    },async url=>{
+      const agent=new Agent(store,new Gateway(url),{historyTurns:0});
+      await assert.rejects(()=>agent.replyStream('请回复'));
+      assert.equal(store.history().length,0);
+    });
+  }finally{store.close();}
 });

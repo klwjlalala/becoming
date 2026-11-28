@@ -69,7 +69,8 @@ export class Gateway{
       try{await reader.cancel();}catch{}
       try{reader.releaseLock();}catch{}
     }
-  }}
+  }
+}
 const EXPLICIT=/请记住|记住[：:]|帮我记|记下|我想更正一下|更正一下我的|更新我的偏好|更新你对我的理解|请更新我的记忆|remember this|please remember|update my memory/i;
 async function modelText(model,messages,{signal,onToken}={}){
   if(typeof model.stream==='function'){
