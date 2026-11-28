@@ -1,9 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {CapabilityRegistry,runCapabilityLoop} from '../capabilities/registry.mjs';
 import {Agent} from '../agent.mjs';
 import {Store} from '../store.mjs';
 import {GrowthStore,GrowthTools} from '../growth.mjs';
+import {AssetStore} from '../assets.mjs';
+import {registerDefaultCapabilities} from '../capabilities/defaults.mjs';
+
+const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/xj8AAAAASUVORK5CYII=','base64');
 
 function chartRegistry(){
   const registry=new CapabilityRegistry();
