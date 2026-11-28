@@ -12,7 +12,7 @@ const sectionPatterns=[
 const isConversationClosure=value=>/^(?:没有了|没有其他(?:补充|想说的)?了?|就这些|没了|到这里|先这样|暂时没有其他补充)[。！!？?]*$/u.test(String(value||'').trim());
 
 export function analyzeReplay(turns){
-  const handbookTurns=turns.filter(turn=>/(?:^|\n)#\s*《个人意义设计手册》/.test(turn.assistant||''));
+  const handbookTurns=turns.filter(turn=>/(?:^|\n)#\s*(?:《)?个人意义设计手册(?:》)?/.test(turn.assistant||''));
   const firstHandbookTurn=handbookTurns[0]||null;
   const handbookTurn=handbookTurns.at(-1)||null;
   const handbook=handbookTurn?.assistant||'';
