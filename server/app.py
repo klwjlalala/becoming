@@ -6,15 +6,57 @@ from urllib.request import Request, build_opener
 from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from becoming.models import NoRedirect
 
 app = FastAPI(title="Becoming LLM gateway")
 class Message(BaseModel):
-    role: Literal["system", "user", "assistant"]
-    content: str = Field(min_length=1,max_length=100000)
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str | None = Field(default=None,max_length=100000)
+    tool_calls: list[dict] | None = Field(default=None,max_length=16)
+    tool_call_id: str | None = Field(default=None,max_length=128)
+
+    @model_validator(mode="after")
+    def validate_message(self):
+        if self.role in ("system", "user", "tool") and not self.content:
+            raise ValueError("Message content is required")
+        if self.role == "tool" and not self.tool_call_id:
+            raise ValueError("Tool message requires tool_call_id")
+        if self.role == "assistant" and not self.content and not self.tool_calls:
+            raise ValueError("Assistant message requires content or tool_calls")
+        return self
+
 class Completion(BaseModel):
-    messages: list[Message] = Field(min_length=1,max_length=40)
+    messages: list[Message] = Field(min_length=1,max_length=60)
+    tools: list[dict] | None = Field(default=None,max_length=32)
+    tool_choice: str | dict | None = None
+
+    @model_validator(mode="after")
+    def validate_tools(self):
+        if self.tools is not None:
+            names=set()
+            for item in self.tools:
+                if not isinstance(item,dict) or set(item)!={"type","function"} or item.get("type")!="function":
+                    raise ValueError("Invalid tool definition")
+                fn=item.get("function")
+                if not isinstance(fn,dict) or not isinstance(fn.get("name"),str) or not __import__("re").fullmatch(r"[A-Za-z0-9_-]{1,64}",fn["name"]):
+                    raise ValueError("Invalid tool name")
+                if fn["name"] in names:
+                    raise ValueError("Duplicate tool name")
+                names.add(fn["name"])
+                if not isinstance(fn.get("description",""),str) or len(fn.get("description",""))>2048:
+                    raise ValueError("Invalid tool description")
+                schema=fn.get("parameters")
+                if not isinstance(schema,dict) or schema.get("type")!="object":
+                    raise ValueError("Tool parameters must be an object schema")
+                if len(json.dumps(schema))>12000:
+                    raise ValueError("Tool schema too large")
+        if isinstance(self.tool_choice,str) and self.tool_choice not in ("auto","none","required"):
+            raise ValueError("Invalid tool_choice")
+        if isinstance(self.tool_choice,dict):
+            if set(self.tool_choice)!={"type","function"} or self.tool_choice.get("type")!="function" or not isinstance(self.tool_choice.get("function"),dict) or set(self.tool_choice["function"])!={"name"}:
+                raise ValueError("Invalid named tool_choice")
+        return self
 
 @app.get("/health")
 def health(): return {"ok":True}
@@ -30,13 +72,23 @@ def llm(request: Completion):
         parsed=urlparse(base)
         if not key or not model or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or not (parsed.scheme=="https" or (parsed.scheme=="http" and parsed.hostname in ("localhost","127.0.0.1","::1"))):
             raise HTTPException(503,"Model not configured")
-        req=Request(base.rstrip("/")+"/chat/completions",data=json.dumps({"model":model,"messages":[m.model_dump() for m in request.messages]}).encode(),headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},method="POST")
-        with build_opener(NoRedirect()).open(req,timeout=60) as response:
+        payload={"model":model,"messages":[m.model_dump(exclude_none=True) for m in request.messages]}
+        if request.tools is not None: payload["tools"]=request.tools
+        if request.tool_choice is not None: payload["tool_choice"]=request.tool_choice
+        req=Request(base.rstrip("/")+"/chat/completions",data=json.dumps(payload).encode(),headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},method="POST")
+        with build_opener(NoRedirect()).open(req,timeout=90) as response:
             result=json.load(response)
-        content=result["choices"][0]["message"]["content"]
-        if not isinstance(content,str) or not content.strip() or len(content)>64000:
+        choice=result["choices"][0]
+        message=choice["message"]
+        content=message.get("content") or ""
+        tool_calls=message.get("tool_calls") or []
+        if not isinstance(content,str) or len(content)>64000 or not isinstance(tool_calls,list) or len(tool_calls)>16 or (not content.strip() and not tool_calls):
             raise ValueError("Invalid model response")
-        return {"text":content.strip(),"usage":result.get("usage")}
+        for call in tool_calls:
+            fn=call.get("function") if isinstance(call,dict) else None
+            if not isinstance(call.get("id"),str) or call.get("type")!="function" or not isinstance(fn,dict) or not isinstance(fn.get("name"),str) or not isinstance(fn.get("arguments"),str) or len(fn["arguments"])>12000:
+                raise ValueError("Invalid tool call response")
+        return {"text":content.strip(),"tool_calls":tool_calls,"finish_reason":choice.get("finish_reason"),"usage":result.get("usage")}
     except HTTPException:
         raise
     except Exception:
@@ -55,7 +107,9 @@ def llm_stream(request: Completion):
         parsed=urlparse(base)
         if not key or not model or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or not (parsed.scheme=="https" or (parsed.scheme=="http" and parsed.hostname in ("localhost","127.0.0.1","::1"))):
             raise HTTPException(503,"Model not configured")
-        payload={"model":model,"messages":[m.model_dump() for m in request.messages],"stream":True}
+        payload={"model":model,"messages":[m.model_dump(exclude_none=True) for m in request.messages],"stream":True}
+        if request.tools is not None: payload["tools"]=request.tools
+        if request.tool_choice is not None: payload["tool_choice"]=request.tool_choice
         req=Request(base.rstrip("/")+"/chat/completions",data=json.dumps(payload).encode(),headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","Accept":"text/event-stream"},method="POST")
         upstream=build_opener(NoRedirect()).open(req,timeout=90)
         if upstream.headers.get_content_type()!="text/event-stream":
