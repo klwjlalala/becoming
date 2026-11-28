@@ -105,4 +105,4 @@ BECOMING_GATEWAY=http://127.0.0.1:8000 npm --prefix agent-runtime run evaluate:m
 
 验收报告会检查首轮提问节奏、12 轮回答保留、长提示词跨历史窗口持续生效、最终手册的章节、篇幅、表格、虚构对话中的关键证据覆盖、是否在用户最后补充前过早交付，以及工具调用失败情况。随后会在独立会话中补充“已掌握 HTML/CSS、只能使用手机”的新约束，检查 Agent 是否真正修订原有的三天 JavaScript 学习计划，而不是只口头确认。它不强制生成图片、图表或关系图；这些能力分别由独立工具调用测试验证。
 
-真实个人 HTML 的回放仍使用 `agent-runtime/validation/replay-html.mjs` 在本地执行。不要将个人对话 HTML 提交到仓库或作为 CI artifact 上传。
+本验收默认最多使用 24 次模型调用，可通过 `MEANING_DESIGN_MAX_CALLS` 调整为 15–40 次；真实模型测试会产生正常 API 用量。\n\n真实个人 HTML 的回放仍使用 `agent-runtime/validation/replay-html.mjs` 在本地执行。不要将个人对话 HTML 提交到仓库或作为 CI artifact 上传。
