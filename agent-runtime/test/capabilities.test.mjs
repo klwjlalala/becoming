@@ -191,3 +191,48 @@ test('registry exposes only enabled capabilities to discovery',()=>{
   assert.deepEqual(result.activate,[]);
   assert.ok(registry.initialNames().includes('discover_capabilities'));
 });
+
+test('image_generate is discovered, executed and persisted across a SQLite restart',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'becoming-image-capability-'));
+  const dbPath=join(dir,'agent.sqlite3'),assetDir=join(dir,'assets');
+  let store=new Store(dbPath);
+  try{
+    let assets=new AssetStore(store,assetDir),imageCalls=0,modelCalls=0;
+    const gateway={generateImage:async({prompt,size})=>{
+      imageCalls++;
+      assert.match(prompt,/山顶|城市/);
+      assert.equal(size,'1024x1024');
+      return {buffer:png,mime_type:'image/png',revised_prompt:'山顶远望城市的插画'};
+    }};
+    const registry=registerDefaultCapabilities({registry:new CapabilityRegistry(),gateway,assetStore:assets,enableImage:true});
+    const model={completeStructured:async(messages,{tools})=>{
+      modelCalls++;
+      if(modelCalls===1)return {text:'',tool_calls:[{id:'image-discovery',type:'function',function:{name:'discover_capabilities',arguments:'{"query":"图片生成"}'}}]};
+      if(modelCalls===2){
+        assert.ok(tools.some(tool=>tool.function.name==='image_generate'),'Image generation was not activated after discovery');
+        return {text:'',tool_calls:[{id:'image-call',type:'function',function:{name:'image_generate',arguments:JSON.stringify({prompt:'山顶远望城市，温暖自然的编辑插画',alt:'山顶远望城市',caption:'把那一刻的感受转化为画面'})}}]};
+      }
+      assert.ok(messages.some(message=>message.role==='tool'&&message.tool_call_id==='image-call'),'The model did not receive the image tool result');
+      return {text:'我已经生成并保存了这张辅助插画。',tool_calls:[]};
+    }};
+    const agent=new Agent(store,model,{capabilities:registry});
+    const turn=await agent.reply('请为我在山顶远望城市时的感受生成一张辅助插画。');
+    assert.equal(turn.assistant,'我已经生成并保存了这张辅助插画。');
+    assert.equal(imageCalls,1);
+    assert.deepEqual(turn.event.capabilities.map(event=>event.name),['discover_capabilities','image_generate']);
+    assert.ok(turn.event.capabilities.every(event=>event.status==='completed'));
+    assert.equal(turn.content_blocks.length,1);
+    assert.equal(turn.content_blocks[0].type,'image');
+    const assetId=turn.content_blocks[0].asset_id;
+    assert.ok(assets.read(assetId),'Generated image must be stored as a local asset');
+    store.close();
+    store=new Store(dbPath);
+    assets=new AssetStore(store,assetDir);
+    const restored=store.turn(turn.id);
+    assert.deepEqual(restored.content_blocks,turn.content_blocks,'Image block must survive process restart');
+    assert.deepEqual(assets.read(assetId).buffer,png,'Generated image bytes must survive process restart');
+  }finally{
+    try{store.close();}catch{}
+    rmSync(dir,{recursive:true,force:true});
+  }
+});
