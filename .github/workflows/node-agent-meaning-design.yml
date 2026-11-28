@@ -67,7 +67,7 @@ jobs:
         env:
           BECOMING_GATEWAY: http://127.0.0.1:8000
           MEANING_DESIGN_MAX_CALLS: ${{ inputs.max_calls || 24 }}
-          MEANING_DESIGN_REPORT: agent-runtime/artifacts/meaning-design-agent-acceptance.json
+          MEANING_DESIGN_REPORT: artifacts/meaning-design-agent-acceptance.json
         run: npm --prefix agent-runtime run evaluate:meaning-design
       - uses: actions/upload-artifact@v4
         if: always()

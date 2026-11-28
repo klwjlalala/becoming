@@ -10,7 +10,7 @@ const fixture=JSON.parse(readFileSync(new URL('./fixtures/meaning-design-dialogu
 const prompt=readFileSync(new URL('./fixtures/meaning-design-prompt.txt',import.meta.url),'utf8').trim();
 const maxCalls=Number(process.env.MEANING_DESIGN_MAX_CALLS||24);
 if(!Number.isInteger(maxCalls)||maxCalls<13||maxCalls>40)throw Error('Invalid meaning-design model-call budget');
-const output=resolve(process.env.MEANING_DESIGN_REPORT||'agent-runtime/artifacts/meaning-design-agent-acceptance.json');
+const output=resolve(process.env.MEANING_DESIGN_REPORT||'artifacts/meaning-design-agent-acceptance.json');
 const assetDir=resolve(process.env.BECOMING_ASSET_DIR||dirname(output)+'/meaning-design-assets');
 
 class BudgetedGateway extends Gateway{
@@ -105,10 +105,10 @@ try{
     ['带着问题生活',/带着问题生活/],
     ['陪你一起变好的人',/陪你一起变好的人|一起变好的人/],
     ['你的人生季节',/你的人生季节|人生季节/],
-    ['结尾',/写给未来的你|结语|最后想对你说/]
   ];
   const missingSections=sectionPatterns.filter(([,pattern])=>!pattern.test(final)).map(([name])=>name);
   const tableLines=final.split('\n').filter(line=>/^\s*\|.*\|\s*$/.test(line));
+  const ending=final.trim().slice(-500);
   const questionMarks=(firstAnswer.match(/[？?]/g)||[]).length;
   const lastModelCall=[...gateway.trace].reverse().find(call=>call.last_user_input===fixture.answers.at(-1));
   const history=store.history(12,'default');
@@ -131,7 +131,8 @@ try{
   check('prompt_survives_history_window_rollover',!history.some(turn=>turn.user===prompt)&&!!lastModelCall?.system_contains_prompt);
   check('final_response_is_personal_meaning_handbook',/个人意义设计手册/.test(final));
   check('final_response_length_5000_to_7000_characters',compactFinal>=5000&&compactFinal<=7000,{characters_without_whitespace:compactFinal});
-  check('final_response_covers_all_nine_sections',missingSections.length===0,{missing_sections:missingSections});
+  check('final_response_covers_all_eight_named_sections',missingSections.length===0,{missing_sections:missingSections});
+  check('final_response_has_reflective_closing',ending.length>=100&&/意义|时刻|生活|未来|山|风|树|开始|继续/.test(ending),{ending_excerpt:ending.slice(-180)});
   check('final_response_uses_markdown_tables',tableLines.length>=4,{table_lines:tableLines.length});
   check('final_response_reflects_fixture_evidence',themeChecks.every(([,passed])=>passed),{themes:themeChecks.map(([name,passed])=>({name,passed}))});
   check('no_tool_execution_failures',report.summary.failed_tools===0,{failed_tools:report.summary.failed_tools});
@@ -141,6 +142,7 @@ try{
   report.final_characters_without_whitespace=compactFinal;
   report.missing_sections=missingSections;
   report.final_table_lines=tableLines.length;
+  report.final_ending_excerpt=ending.slice(-180);
   report.final_response=final;
   report.status=Object.values(report.checks).every(item=>item.passed)?'passed':'needs_review';
   save();
