@@ -1,4 +1,5 @@
 name: Node agent deterministic tests
+# Keep prompt-policy-only changes covered by this deterministic suite.
 
 on:
   push:
