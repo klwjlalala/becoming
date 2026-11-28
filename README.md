@@ -1,4 +1,4 @@
-> **Node migration branch:** [Current scope and startup](docs/local-agent-web.md). Python is a stateless LLM gateway; Node owns the agent. The historical Python documentation below is a reference only.
+> **AI Friend Web V1:** Run the Python model gateway and `npm --prefix agent-runtime start`; see [docs/ai-friend-web-v1.md](docs/ai-friend-web-v1.md).\n\n> **Node migration branch:** [Current scope and startup](docs/local-agent-web.md). Python is a stateless LLM gateway; Node owns the agent. The historical Python documentation below is a reference only.
 
 # Becoming
 
@@ -93,7 +93,7 @@ PowerShell 可使用 $env:BECOMING_BASE_URL 等变量。真实模式会把当前
 
 ## 开发原则
 
-以理解人、帮助人而非任务完成率为核心。用户拥有对自己的最终解释权。区分原始信息与推断；不进行未经验证的心理诊断，不制造依赖；后续记忆与认知机制需支持纠正和删除。暂不引入前端、向量数据库、Agent 框架或多智能体。
+以理解人、帮助人而非任务完成率为核心。用户拥有对自己的最终解释权。区分原始信息与推断；不进行未经验证的心理诊断，不制造依赖；后续记忆与认知机制需支持纠正和删除。当前 Web 页面保持为轻量交互层；暂不引入向量数据库、Agent 框架或多智能体。
 
 ## 长期记忆 V1（实验、默认关闭）
 
