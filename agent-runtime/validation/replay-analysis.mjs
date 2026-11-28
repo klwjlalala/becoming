@@ -26,9 +26,16 @@ export function analyzeReplay(turns){
   const artifactAfterLatestInput=!!handbookTurn&&(!latestSubstantiveUserTurn||handbookTurn.index>=latestSubstantiveUserTurn.index);
   const finalConfirmationResponse=latestSubstantiveUserTurn?.assistant||'';
   const finalConfirmationQuestionMarks=(finalConfirmationResponse.match(/[？?]/g)||[]).length;
-  const knownAge=turns.some(turn=>turn.kind==='replayed_user_turn'&&/\d{1,3}\s*岁/u.test(String(turn.user||'')));
-  const reasksKnownAge=knownAge&&(/\d{1,3}\s*岁[^。！？\n]{0,20}(?:对吗|可以吗|是吗|吗[？?])/u.test(finalConfirmationResponse)||/(?:年龄|岁数)[^。！？\n]{0,12}(?:对吗|可以吗|确认)/u.test(finalConfirmationResponse));
-  const asksStandaloneFinalConfirmation=/(?:补充|修正)/.test(finalConfirmationResponse)&&finalConfirmationQuestionMarks===1&&!reasksKnownAge&&!/个人意义设计手册/.test(finalConfirmationResponse);
+  const knownAgeTurn=turns.find(turn=>turn.kind==='replayed_user_turn'&&/\d{1,3}\s*岁/u.test(String(turn.user||'')))||null;
+  const knownAge=!!knownAgeTurn;
+  const ageQuestionPattern=/(?:\d{1,3}\s*岁[^。！？\n]{0,20}(?:对吗|可以吗|是吗|吗[？?])|(?:年龄|岁数)[^。！？\n]{0,12}(?:对吗|可以吗|确认))/u;
+  const reasksKnownAgeTurns=knownAge?turns.filter(turn=>turn.index>knownAgeTurn.index&&ageQuestionPattern.test(String(turn.assistant||''))).map(turn=>turn.index):[];
+  const reasksKnownAge=reasksKnownAgeTurns.length>0;
+  const finalConfirmationQuestionPattern=/(?:你还有.{0,12}(?:补充|修正)|还有.{0,12}(?:补充|修正)|(?:补充|修正).{0,12}(?:吗[？?]|有没有|是否))/u;
+  const finalConfirmationTurns=turns.filter(turn=>turn.kind==='replayed_user_turn'&&finalConfirmationQuestionPattern.test(String(turn.assistant||'')));
+  const prematureFinalConfirmationTurns=finalConfirmationTurns.filter(turn=>turn.index!==latestSubstantiveUserTurn?.index).map(turn=>turn.index);
+  const finalConfirmationQuestionIntents=finalConfirmationResponse.match(/有没有|是否|谁|什么样|什么时候|哪个|哪位|为什么|怎么(?:样|做)?|你想不想|你希望|你想|能不能|可不可以|还有什么|还有没有|是否还有/gu)||[];
+  const asksStandaloneFinalConfirmation=finalConfirmationQuestionPattern.test(finalConfirmationResponse)&&finalConfirmationQuestionMarks===1&&finalConfirmationQuestionIntents.length===1&&!reasksKnownAge&&!/个人意义设计手册/.test(finalConfirmationResponse);
 
   const checks={
     personal_meaning_handbook_generated:{passed:!!handbookTurn,detail:{turn_index:handbookTurn?.index??null}},
@@ -39,8 +46,10 @@ export function analyzeReplay(turns){
     handbook_generated_after_last_substantive_user_turn:{passed:artifactAfterLatestInput,detail:{handbook_turn_index:handbookTurn?.index??null,latest_substantive_user_turn_index:latestSubstantiveUserTurn?.index??null,final_turn_index:finalTurn?.index??null}},
     handbook_generated_after_closure_signal:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||handbookTurn?.index===finalTurn.index,detail:{first_handbook_turn_index:firstHandbookTurn?.index??null,latest_handbook_turn_index:handbookTurn?.index??null,final_turn_index:finalTurn?.index??null,final_turn_is_closure:isConversationClosure(finalTurn?.user)}},
     handbook_not_prematurely_delivered:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||!firstHandbookTurn||firstHandbookTurn.index===finalTurn.index||/(?:草稿|初稿|阶段性版本)/.test((firstHandbookTurn.assistant||'').slice(0,180)),detail:{first_handbook_turn_index:firstHandbookTurn?.index??null,final_turn_index:finalTurn?.index??null,final_turn_is_closure:isConversationClosure(finalTurn?.user),first_handbook_is_explicitly_draft:!!firstHandbookTurn&&/(?:草稿|初稿|阶段性版本)/.test((firstHandbookTurn.assistant||'').slice(0,180))}},
-    known_age_was_not_reconfirmed:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||!knownAge||!reasksKnownAge,detail:{known_age_from_user:knownAge,reasks_known_age:reasksKnownAge,response_excerpt:finalConfirmationResponse.slice(0,240)}},
-    standalone_final_confirmation_was_requested:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||asksStandaloneFinalConfirmation,detail:{latest_substantive_user_turn_index:latestSubstantiveUserTurn?.index??null,confirmation_question_marks:finalConfirmationQuestionMarks,contains_addition_question:/补充|修正/.test(finalConfirmationResponse),known_age_from_user:knownAge,reasks_known_age:reasksKnownAge,response_excerpt:finalConfirmationResponse.slice(0,240)}}
+    known_age_was_not_reconfirmed:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||!reasksKnownAge,detail:{known_age_from_user:knownAge,reasks_known_age:reasksKnownAge,reasks_known_age_turn_indices:reasksKnownAgeTurns}},
+    final_confirmation_not_asked_before_last_substantive_turn:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||prematureFinalConfirmationTurns.length===0,detail:{latest_substantive_user_turn_index:latestSubstantiveUserTurn?.index??null,final_confirmation_turn_indices:finalConfirmationTurns.map(turn=>turn.index),premature_confirmation_turn_indices:prematureFinalConfirmationTurns}},
+    standalone_final_confirmation_was_requested:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||asksStandaloneFinalConfirmation,detail:{latest_substantive_user_turn_index:latestSubstantiveUserTurn?.index??null,confirmation_question_marks:finalConfirmationQuestionMarks,question_intent_count:finalConfirmationQuestionIntents.length,contains_addition_question:finalConfirmationQuestionPattern.test(finalConfirmationResponse),known_age_from_user:knownAge,reasks_known_age:reasksKnownAge,response_excerpt:finalConfirmationResponse.slice(0,240)}},
+    final_confirmation_was_requested_once_after_last_substantive_turn:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||(finalConfirmationTurns.length===1&&finalConfirmationTurns[0].index===latestSubstantiveUserTurn?.index),detail:{latest_substantive_user_turn_index:latestSubstantiveUserTurn?.index??null,final_confirmation_turn_indices:finalConfirmationTurns.map(turn=>turn.index)}}
   };
   return {
     handbook_turn_index:handbookTurn?.index??null,
@@ -60,6 +69,9 @@ export function analyzeReplay(turns){
     final_confirmation_question_marks:finalConfirmationQuestionMarks,
     known_age_from_user:knownAge,
     reasks_known_age:reasksKnownAge,
+    reasks_known_age_turn_indices:reasksKnownAgeTurns,
+    final_confirmation_turn_indices:finalConfirmationTurns.map(turn=>turn.index),
+    premature_final_confirmation_turn_indices:prematureFinalConfirmationTurns,
     checks
   };
 }
