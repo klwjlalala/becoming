@@ -89,6 +89,19 @@ if(process.argv.includes('--live')){
    result.correction_evidence_rows=correctionEvidenceRows;
    if(!correctionEvidenceRows)throw Error('Explicit correction did not produce traceable personal-understanding evidence');
 
+   const memorySuppressionExpectations=[
+    {index:5,reason:'third_party_only'},
+    {index:16,reason:'transient_mood'},
+    {index:23,reason:'listen_only'}
+   ];
+   result.memory_suppression_checks=[];
+   for(const expected of memorySuppressionExpectations){
+    const search=result.turns[expected.index]?.event?.memory_search;
+    const passed=search?.query_mode==='suppressed'&&search.suppression_reason===expected.reason;
+    result.memory_suppression_checks.push({day:result.turns[expected.index]?.day,expected:expected.reason,actual:search,passed});
+    if(!passed)throw Error('Long-memory retrieval was not suppressed for '+expected.reason);
+   }
+
    const completedJobs=r.store.jobCounts();
    result.completed_job_counts=completedJobs;
    if(completedJobs.pending||completedJobs.running||completedJobs.failed)throw Error('Background processing did not finish cleanly: '+JSON.stringify(completedJobs));

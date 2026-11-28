@@ -1,4 +1,5 @@
 import {EXTRACT_PROMPT,SELECT_PROMPT,MEMORY_CONTEXT} from './memory-prompts.mjs';
+import {LISTEN_ONLY_CUES,THIRD_PARTY_ONLY_CUES,TRANSIENT_MOOD_CUES,PERSONAL_QUERY_CUES} from './understanding-policy.mjs';
 export const SECRET=/(?:\bsk-[a-z0-9_-]{12,}|(?:api[_ -]?key|password|密码|密钥)\s*[:：=]\s*\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----)/i;
 const KEY=/^[\p{L}\p{N}_-]{1,48}$/u;
 const CATEGORIES=new Set(['fact','experience','subjective']);
@@ -24,6 +25,11 @@ export function terms(text){
   for(const t of STOP)result.delete(t);return result;
 }
 const overlap=(a,b)=>[...a].filter(x=>b.has(x)).length;
+const has=(text,cues)=>cues.some(cue=>text.includes(cue));
+function retrievalSuppression(query){
+  const reflective=has(query,PERSONAL_QUERY_CUES);
+  return has(query,LISTEN_ONLY_CUES)?'listen_only':has(query,THIRD_PARTY_ONLY_CUES)&&!has(query,['我自己','我也','我为什么','我感到','让我','对我来说'])?'third_party_only':has(query,TRANSIENT_MOOD_CUES)&&!reflective?'transient_mood':null;
+}
 function normalize(key){if(typeof key!=='string'||!KEY.test(key=key.trim().toLowerCase()))throw Error('Invalid memory key');return key;}
 export function parseCandidate(item,user){
   if(!item||typeof item!=='object'||Array.isArray(item)||!['category,key,quote','category,key,quote,replaces'].includes(Object.keys(item).sort().join(',')))throw Error('Invalid memory item');
@@ -44,13 +50,27 @@ export class LongMemory{
   async retrieve(query,limit=5){
     this.lastSearch=null;
     if(!Number.isInteger(limit)||limit<0||limit>10)throw Error('Invalid limit');
-    if(!limit||!query.trim()||SECRET.test(query))return [];
+    if(!limit||!query.trim()||SECRET.test(query)){
+      this.lastSearch={candidate_ids:[],selected_ids:[],query_mode:'empty'};
+      return [];
+    }
+    const suppression=retrievalSuppression(query);
+    if(suppression){
+      this.lastSearch={candidate_ids:[],selected_ids:[],query_mode:'suppressed',suppression_reason:suppression};
+      return [];
+    }
     const q=terms(query),ranked=this.list().map(m=>{let score=3*overlap(q,terms(m.key))+overlap(q,terms(m.quote));if(score&&CUES[m.category].some(c=>query.includes(c)))score++;return {m,score};}).sort((a,b)=>b.score-a.score||b.m.id-a.m.id);
-    if(!this.semantic)return ranked.filter(r=>r.score>0).slice(0,limit).map(r=>r.m);
-    const pool=ranked.slice(0,40).map(r=>r.m);if(!pool.length)return [];
+    if(!this.semantic){
+      const candidates=ranked.filter(r=>r.score>0),selected=candidates.slice(0,limit).map(r=>r.m);
+      this.lastSearch={candidate_ids:candidates.map(r=>r.m.id),selected_ids:selected.map(m=>m.id),query_mode:'lexical'};
+      return selected;
+    }
+    const pool=ranked.slice(0,40).map(r=>r.m);
+    if(!pool.length){this.lastSearch={candidate_ids:[],selected_ids:[],query_mode:'semantic'};return [];}
     const raw=await this.model.complete([{role:'system',content:SELECT_PROMPT},{role:'user',content:JSON.stringify({query,limit,candidates:pool.map(({id,key,category,quote})=>({id,key,category,quote}))})}]);
     const ids=JSON.parse(raw),known=new Map(pool.map(m=>[m.id,m]));
     if(!Array.isArray(ids)||ids.length>limit||new Set(ids).size!==ids.length||ids.some(id=>!Number.isInteger(id)||!known.has(id)))throw Error('Invalid selected ID');
+    this.lastSearch={candidate_ids:pool.map(m=>m.id),selected_ids:ids,query_mode:'semantic'};
     return ids.map(id=>known.get(id));
   }
   context(items){return MEMORY_CONTEXT+'\n'+JSON.stringify(items.map(({recorded_at,active,...m})=>({...m,recorded_at_utc:recorded_at,active:!!active})));}
@@ -84,7 +104,7 @@ export class LongMemory{
     const hints=this.list().sort((a,b)=>score(b)-score(a)||b.id-a.id).slice(0,30).map(({id,key,category,quote})=>({id,key,category,quote}));
     const raw=await this.model.complete([{role:'system',content:this.extractionPrompt()},{role:'user',content:JSON.stringify({current_user_message:user,existing_slots:hints,blocked_keys:this.blockedKeys().slice(0,100)})}]);
     const data=JSON.parse(raw);if(!Array.isArray(data)||data.length>12)throw Error('Invalid extraction batch');
-    const parsed=[];let rejected=0;
+    const parsed=[];let rejected=0,conflicts=0;
     for(const item of data){try{parsed.push(parseCandidate(item,user));}catch{rejected++;}}
     const counts=new Map();for(const c of parsed)counts.set(c.key,(counts.get(c.key)||0)+1);
     return this.store.transaction(()=>{
@@ -95,10 +115,11 @@ export class LongMemory{
         if(counts.get(c.key)!==1){rejected++;continue;}
         this.db.exec('SAVEPOINT memory_item');
         try{this.validateRevision(c);const id=this.writeChecked(c,turnId);if(id!==null)written.push(id);}
-        catch(e){this.db.exec('ROLLBACK TO memory_item');if(e.message!=='Memory revision conflict')throw e;rejected++;}
+        catch(e){this.db.exec('ROLLBACK TO memory_item');if(e.message!=='Memory revision conflict')throw e;rejected++;conflicts++;}
         finally{this.db.exec('RELEASE memory_item');}
       }
-      if(data.length&&rejected===data.length)throw Error('All memory candidates rejected');
+      if(data.length&&!parsed.length)throw Error('All memory candidates invalid');
+      if(data.length&&rejected===data.length&&!conflicts)throw Error('All memory candidates rejected');
       this.mark(turnId);return {written,rejected};
     });
   }

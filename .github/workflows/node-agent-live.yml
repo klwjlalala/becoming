@@ -3,6 +3,7 @@ on:
   push:
     branches: [feat/local-agent-web, feat/ai-friend-web-v1]
     paths: ['.github/workflows/node-agent-live.yml', 'evaluation/personal_understanding_cases.json']
+    # Updating this workflow explicitly opts into the long-session real-model evaluation.
   workflow_dispatch:
     inputs:
       suite:
