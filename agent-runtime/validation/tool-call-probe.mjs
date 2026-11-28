@@ -6,7 +6,7 @@ import {CapabilityRegistry,runCapabilityLoop} from '../capabilities/registry.mjs
 const output=resolve(process.env.TOOL_CALL_REPORT||'agent-runtime/artifacts/tool-call-probe.json');
 const report={test:'native-function-tool-call-and-discovery-probe',model_calls:0,provider_response:null};
 const model=new Gateway(process.env.BECOMING_GATEWAY||'http://127.0.0.1:8000');
-let modelCalls=0;const completeStructured=model.completeStructured.bind(model);model.completeStructured=async(...args)=>{modelCalls++;return completeStructured(...args);};
+let modelCalls=0;for(const method of ['completeStructured','streamStructured']){const original=model[method].bind(model);model[method]=async(...args)=>{modelCalls++;return original(...args);};}
 const tool={type:'function',function:{
   name:'record_test_result',
   description:'Record a successful tool-call capability probe. Call this exactly once when asked.',
