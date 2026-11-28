@@ -10,6 +10,12 @@ on:
       - 'agent-runtime/validation/tool-call-probe.mjs'
       - '.github/workflows/node-agent-toolcall-probe.yml'
   workflow_dispatch:
+    inputs:
+      probe_image:
+        description: 'Run one paid image-generation smoke test (requires image model secrets)'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -55,6 +61,9 @@ jobs:
           BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
           BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
           BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
+          BECOMING_IMAGE_MODEL: ${{ secrets.BECOMING_IMAGE_MODEL }}
+          BECOMING_IMAGE_BASE_URL: ${{ secrets.BECOMING_IMAGE_BASE_URL }}
+          BECOMING_IMAGE_API_KEY: ${{ secrets.BECOMING_IMAGE_API_KEY }}
         run: |
           python -m uvicorn server.app:app --host 127.0.0.1 --port 8000 >/tmp/becoming-gateway.log 2>&1 &
           echo $! > /tmp/becoming-gateway.pid
@@ -69,12 +78,23 @@ jobs:
           BECOMING_GATEWAY: http://127.0.0.1:8000
           TOOL_CALL_REPORT: agent-runtime/artifacts/tool-call-probe.json
         run: node agent-runtime/validation/tool-call-probe.mjs
+      - name: Probe image generation (manual opt-in only)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.probe_image }}
+        env:
+          BECOMING_GATEWAY: http://127.0.0.1:8000
+          IMAGE_PROBE_REPORT: agent-runtime/artifacts/image-generation-probe.json
+        run: node agent-runtime/validation/image-generation-probe.mjs
       - name: Upload probe report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: node-agent-tool-call-probe
-          path: agent-runtime/artifacts/tool-call-probe.json
+          path: |
+            agent-runtime/artifacts/tool-call-probe.json
+            agent-runtime/artifacts/image-generation-probe.json
+            agent-runtime/artifacts/image-generation-probe.png
+            agent-runtime/artifacts/image-generation-probe.jpg
+            agent-runtime/artifacts/image-generation-probe.webp
           if-no-files-found: warn
           retention-days: 14
       - name: Stop model gateway
