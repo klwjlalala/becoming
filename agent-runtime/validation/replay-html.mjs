@@ -9,6 +9,7 @@ import {CapabilityRegistry} from '../capabilities/registry.mjs';
 import {registerDefaultCapabilities} from '../capabilities/defaults.mjs';
 import {AssetStore} from '../assets.mjs';
 import {parseSource} from './html-replay-parser.mjs';
+import {analyzeReplay} from './replay-analysis.mjs';
 
 const sourcePath=process.argv[2];
 if(!sourcePath){console.error('Usage: node agent-runtime/validation/replay-html.mjs <conversation.html>');process.exit(2);}
@@ -108,21 +109,10 @@ try{
   store=new Store(dbPath);assetStore=new AssetStore(store,assetDir);report.database_restart_verified=true;
 
   const firstAnswer=report.turns[0]?.assistant||'';
-  const final=report.turns.at(-1)?.assistant||'';
-  const compactFinal=Array.from(final.replace(/\s/g,'')).length;
-  const sectionPatterns=[
-    ['你在这里',/你在这里/],
-    ['你早就拥有的意义',/你早就拥有的意义|早已拥有的意义/],
-    ['被你忽略的部分',/被你忽略的部分|你可能忽略的部分/],
-    ['你的人生罗盘',/你的人生罗盘|人生罗盘/],
-    ['设计更多意义时刻',/设计更多意义时刻|亲手设计更多|更多有意义的时刻/],
-    ['带着问题生活',/带着问题生活/],
-    ['陪你一起变好的人',/陪你一起变好的人|一起变好的人/],
-    ['你的人生季节',/你的人生季节|人生季节/]
-  ];
-  const missingSections=sectionPatterns.filter(([,pattern])=>!pattern.test(final)).map(([name])=>name);
-  const tableLines=final.split('\n').filter(line=>/^\s*\|.*\|\s*$/.test(line));
-  const ending=final.trim().slice(-500);
+  const analysis=analyzeReplay(report.turns);
+  const handbookTurn=report.turns.find(turn=>turn.index===analysis.handbook_turn_index)||null;
+  const final=handbookTurn?.assistant||'';
+  const compactFinal=analysis.handbook_characters_without_whitespace;
   const history=store.history(200,'default'),recentHistory=store.history(12,'default');
   const imageBlocks=report.turns.flatMap(turn=>turn.content_blocks||[]).filter(block=>block.type==='image');
   const invalidAssets=imageBlocks.filter(block=>!block.asset_id||!assetStore.read(block.asset_id));
@@ -140,11 +130,7 @@ try{
   check('all_user_turns_replayed',report.turns.length===userTurns.length+1,{expected:userTurns.length,actual:report.turns.length});
   check('all_user_turns_preserved_in_order',history.slice(-userTurns.length).every((turn,index)=>turn.user===userTurns[index]));
   check('prompt_remains_active_after_history_window',instructions?.content===prompt&&(!recentHistory.some(turn=>turn.user===prompt)||userTurns.length<12));
-  check('final_response_is_personal_meaning_handbook',/个人意义设计手册/.test(final));
-  check('final_response_length_5000_to_7000_characters',compactFinal>=5000&&compactFinal<=7000,{characters_without_whitespace:compactFinal});
-  check('final_response_covers_all_eight_named_sections',missingSections.length===0,{missing_sections:missingSections});
-  check('final_response_has_reflective_closing',ending.length>=100&&/意义|时刻|生活|未来|山|风|树|开始|继续/.test(ending),{ending_excerpt:ending.slice(-180)});
-  check('final_response_uses_markdown_tables',tableLines.length>=4,{table_lines:tableLines.length});
+  for(const [name,result] of Object.entries(analysis.checks))check(name,result.passed,result.detail??null);
   check('no_tool_execution_failures',report.summary.failed_tools===0,{failed_tools:report.summary.failed_tools});
   check('image_capability_matches_configuration',imageEnabled?registry.has('image_generate'):!registry.has('image_generate'));
   check('all_generated_images_are_valid_local_assets',invalidAssets.length===0,{image_blocks:imageBlocks.length,invalid_asset_ids:invalidAssets.map(block=>block.asset_id||null)});
@@ -155,16 +141,18 @@ try{
   check('no_unconfirmed_growth_mutations',report.turns.every(turn=>!turn.pending_growth));
 
   report.finished_at=new Date().toISOString();
+  report.handbook=analysis;
   report.final_answer_characters=Array.from(final).length;
   report.final_characters_without_whitespace=compactFinal;
-  report.final_table_lines=tableLines.length;
-  report.missing_sections=missingSections;
-  report.final_ending_excerpt=ending.slice(-180);
+  report.final_table_lines=analysis.handbook_table_lines;
+  report.missing_sections=analysis.handbook_missing_sections;
+  report.final_ending_excerpt=analysis.handbook_ending_excerpt;
+  report.last_turn_response_characters=analysis.final_turn_response_characters;
   report.instruction_remained_active=!!instructions;
   report.visual_diagnostic=imageEnabled?(imageBlocks.length?'image_generation_used':'image_generation_enabled_but_not_selected'):'image_generation_disabled';
   report.status=Object.values(report.checks).every(item=>item.passed)?'passed':'needs_review';
   save();
-  console.log(JSON.stringify({status:report.status,turns:userTurns.length,summary:report.summary,final_characters_without_whitespace:compactFinal,checks:report.checks,report:output,assets:assetDir},null,2));
+  console.log(JSON.stringify({status:report.status,turns:userTurns.length,summary:report.summary,handbook_characters_without_whitespace:compactFinal,handbook_turn_index:analysis.handbook_turn_index,latest_substantive_user_turn_index:analysis.latest_substantive_user_turn_index,checks:report.checks,report:output,assets:assetDir},null,2));
   if(report.status!=='passed')process.exitCode=1;
 }catch(error){
   report.status='failed';report.error=error.message;report.finished_at=new Date().toISOString();
