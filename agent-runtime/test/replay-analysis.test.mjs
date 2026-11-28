@@ -110,3 +110,25 @@ test('replay analysis rejects combining the final additions check with a substan
   assert.equal(result.checks.standalone_final_confirmation_was_requested.passed,false);
   assert.equal(result.checks.final_confirmation_was_requested_once_after_last_substantive_turn.passed,true);
 });
+
+test('standalone final confirmation may include optional examples after the single question',()=>{
+  const turns=[
+    {index:0,kind:'initial_instruction',assistant:'开始探索'},
+    {index:1,kind:'replayed_user_turn',user:'我今年28岁。',assistant:'明白。'},
+    {index:2,kind:'replayed_user_turn',user:'我的生活目标',assistant:'在开始整理手册前，还有什么想补充或修正的吗？比如那次山顶的经历、你想做的AI游戏，或你希望帮助别人的方式。也可以回答“没有了”。'},
+    {index:3,kind:'replayed_user_turn',user:'没有了',assistant:handbook}
+  ];
+  const result=analyzeReplay(turns);
+  assert.equal(result.checks.standalone_final_confirmation_was_requested.passed,true);
+});
+
+test('standalone final confirmation rejects a second question clause even without a second question mark',()=>{
+  const turns=[
+    {index:0,kind:'initial_instruction',assistant:'开始探索'},
+    {index:1,kind:'replayed_user_turn',user:'我今年28岁。',assistant:'明白。'},
+    {index:2,kind:'replayed_user_turn',user:'我的生活目标',assistant:'你身边有没有适合聊这些的人，以及还有什么想补充或修正的吗？'},
+    {index:3,kind:'replayed_user_turn',user:'没有了',assistant:handbook}
+  ];
+  const result=analyzeReplay(turns);
+  assert.equal(result.checks.standalone_final_confirmation_was_requested.passed,false);
+});
