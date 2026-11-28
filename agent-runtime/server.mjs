@@ -70,6 +70,28 @@ capabilities.register({
       return {asset_id:asset.id,mime_type:asset.mime_type,blocks:[{type:'image',asset_id:asset.id,alt:args.alt||'AI 生成的辅助图片',caption:args.caption||generated.revised_prompt||''}]};
     }
 });
+capabilities.register({
+  name:'diagram_create',
+  description:'Create a structured relationship or process diagram from labeled nodes and directed connections.',
+  category:'visualization',
+  keywords:['关系图','流程图','思维导图','结构图','diagram','flowchart','mind map'],
+  parameters:{
+    type:'object',
+    properties:{
+      title:{type:'string',minLength:1,maxLength:120},
+      layout:{type:'string',enum:['vertical','horizontal']},
+      nodes:{type:'array',minItems:2,maxItems:10,items:{type:'object',properties:{id:{type:'string',minLength:1,maxLength:24},label:{type:'string',minLength:1,maxLength:48},description:{type:'string',maxLength:80}},required:['id','label'],additionalProperties:false}},
+      edges:{type:'array',maxItems:16,items:{type:'object',properties:{from:{type:'string',minLength:1,maxLength:24},to:{type:'string',minLength:1,maxLength:24},label:{type:'string',maxLength:40}},required:['from','to'],additionalProperties:false}}
+    },
+    required:['title','layout','nodes','edges'],
+    additionalProperties:false
+  },
+  handler:args=>{
+    const ids=new Set(args.nodes.map(node=>node.id));
+    if(ids.size!==args.nodes.length||args.edges.some(edge=>!ids.has(edge.from)||!ids.has(edge.to)||edge.from===edge.to))throw Error('Diagram contains duplicate or unknown node references');
+    return {blocks:[{type:'diagram',title:args.title,layout:args.layout,nodes:args.nodes,edges:args.edges}]};
+  }
+});
 const agent=new Agent(store,gateway,{memory,understanding,growth,capabilities});
 const worker=new BackgroundWorker(store,{'long_memory.extract':id=>{if(!memory)throw Error('Memory disabled');return memory.extract(id);},'personal_understanding.process':id=>{if(!understanding)throw Error('Understanding disabled');return understanding.processTurn(id);}});
 setInterval(()=>{worker.tick().catch(()=>console.error('Background worker tick failed'));},1000).unref();
