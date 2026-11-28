@@ -36,12 +36,10 @@ jobs:
           BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
           BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
           BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
-          SUITE: ${{ inputs.suite || 'web-smoke' }}
-          LONG_SESSION_PUSH: ${{ github.event_name == 'push' && github.event.head_commit.message == 'test: evaluate AI friend long session' }}
+          SUITE: ${{ inputs.suite || 'long-session' }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$LONG_SESSION_PUSH" == "true" ]]; then SUITE=long-session; fi
           for k in BECOMING_BASE_URL BECOMING_API_KEY BECOMING_MODEL; do
             if [[ -z "${!k}" ]]; then echo "::error::Missing repository secret: $k"; exit 1; fi
           done
