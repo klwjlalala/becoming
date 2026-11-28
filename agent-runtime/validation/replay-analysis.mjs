@@ -26,8 +26,8 @@ export function analyzeReplay(turns){
   const artifactAfterLatestInput=!!handbookTurn&&(!latestSubstantiveUserTurn||handbookTurn.index>=latestSubstantiveUserTurn.index);
   const finalConfirmationResponse=latestSubstantiveUserTurn?.assistant||'';
   const finalConfirmationQuestionMarks=(finalConfirmationResponse.match(/[？?]/g)||[]).length;
-  const knownAge=turns.some(turn=>turn.kind==='replayed_user_turn'&&/\\d{1,3}\\s*岁/u.test(String(turn.user||'')));
-  const reasksKnownAge=knownAge&&/(?:年龄|(?:你|自己)(?:现在|前面)?(?:是)?\\s*\\d{1,3}\\s*岁|按\\s*\\d{1,3}\\s*岁)/u.test(finalConfirmationResponse);
+  const knownAge=turns.some(turn=>turn.kind==='replayed_user_turn'&&/\d{1,3}\s*岁/u.test(String(turn.user||'')));
+  const reasksKnownAge=knownAge&&/(?:年龄|(?:你|自己)(?:现在|前面)?(?:是)?\s*\d{1,3}\s*岁|按\s*\d{1,3}\s*岁)/u.test(finalConfirmationResponse);
   const asksStandaloneFinalConfirmation=/(?:补充|修正)/.test(finalConfirmationResponse)&&finalConfirmationQuestionMarks===1&&!reasksKnownAge&&!/个人意义设计手册/.test(finalConfirmationResponse);
 
   const checks={
