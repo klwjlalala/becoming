@@ -5,6 +5,7 @@ import os
 import re
 from typing import Literal
 from urllib.request import Request, build_opener
+from urllib.error import HTTPError
 from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -135,8 +136,10 @@ def llm_stream(request: Completion):
         return StreamingResponse(chunks(),media_type="text/event-stream",headers={"Cache-Control":"no-cache, no-transform","X-Accel-Buffering":"no"})
     except HTTPException:
         raise
-    except Exception:
-        raise HTTPException(502,"Upstream model stream failed") from None
+    except HTTPError as exc:
+        raise HTTPException(502,f"Upstream model stream failed (HTTP {exc.code})") from None
+    except Exception as exc:
+        raise HTTPException(502,f"Upstream model stream failed ({type(exc).__name__})") from None
 
 class EmbeddingRequest(BaseModel):
     texts: list[str] = Field(min_length=1,max_length=32)
