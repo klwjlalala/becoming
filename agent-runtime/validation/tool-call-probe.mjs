@@ -2,6 +2,7 @@ import {mkdirSync,writeFileSync} from 'node:fs';
 import {dirname,resolve} from 'node:path';
 import {Gateway} from '../agent.mjs';
 import {CapabilityRegistry,runCapabilityLoop} from '../capabilities/registry.mjs';
+import {registerDefaultCapabilities} from '../capabilities/defaults.mjs';
 
 const output=resolve(process.env.TOOL_CALL_REPORT||'agent-runtime/artifacts/tool-call-probe.json');
 const report={test:'native-function-tool-call-and-discovery-probe',model_calls:0,provider_response:null};
@@ -28,28 +29,7 @@ try{
   const call=calls[0],args=JSON.parse(call.function.arguments);
   if(call.function.name!=='record_test_result'||args.value!=='tool-call-ok')throw Error('Provider returned an unexpected function name or arguments');
   report.checks={native_tool_call:true,forced_tool_choice:true,arguments_valid:true};
-  const registry=new CapabilityRegistry();
-  registry.register({
-    name:'chart_create',
-    description:'Create a visual chart from structured data. Supports bar, line and pie charts.',
-    category:'visualization',
-    keywords:['图表','chart','可视化'],
-    parameters:{
-      type:'object',
-      properties:{
-        title:{type:'string',minLength:1,maxLength:120},
-        chart_type:{type:'string',enum:['bar','line','pie']},
-        labels:{type:'array',minItems:1,maxItems:8,items:{type:'string',maxLength:40}},
-        values:{type:'array',minItems:1,maxItems:8,items:{type:'number',minimum:0,maximum:1000}}
-      },
-      required:['title','chart_type','labels','values'],
-      additionalProperties:false
-    },
-    handler:args=>{
-      if(args.labels.length!==args.values.length)throw Error('Mismatched chart data');
-      return {blocks:[{type:'chart',chartType:args.chart_type,title:args.title,labels:args.labels,values:args.values}]};
-    }
-  });
+  const registry=registerDefaultCapabilities({registry:new CapabilityRegistry(),enableImage:false});
   const chart=await runCapabilityLoop(model,[
     {role:'system',content:'You can discover tools with discover_capabilities. The user asks for a chart. Discover the relevant capability, call it with the user data, and then briefly report completion.'},
     {role:'user',content:'请把下面数据制作成柱状图：一月 2，二月 4，三月 7。标题为每月阅读量。'}
@@ -58,6 +38,15 @@ try{
   report.chart_test={answer:chart.answer,events:chart.events,blocks:chart.blocks};
   report.checks.capability_discovery=true;
   report.checks.chart_tool_executed=true;
+  const diagram=await runCapabilityLoop(model,[
+    {role:'system',content:'You can discover tools with discover_capabilities. The user asks for a relationship diagram. Discover the relevant capability, call it with the requested relationships, then briefly report completion.'},
+    {role:'user',content:'请制作一张横向关系图，展示“好奇心 → 探索 → 创造 → 帮助他人”的关系。请为每个节点写一句简短说明，并连接相邻节点。'}
+  ],registry,{maxRounds:5,maxCalls:4});
+  const diagramEvent=diagram.events.find(event=>event.name==='diagram_create'&&event.status==='completed');
+  if(!diagramEvent||!diagram.blocks.some(block=>block.type==='diagram'&&block.nodes?.length>=2&&block.edges?.length>=1))throw Error('The model did not discover and execute the diagram capability');
+  report.diagram_test={answer:diagram.answer,events:diagram.events,blocks:diagram.blocks};
+  report.checks.diagram_capability_discovery=diagram.events.some(event=>event.name==='discover_capabilities'&&event.status==='completed');
+  report.checks.diagram_tool_executed=!!diagramEvent;
   report.status='supported';
 }catch(error){
   report.status='unsupported_or_incompatible';
