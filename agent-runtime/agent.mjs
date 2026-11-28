@@ -158,7 +158,7 @@ export class Agent{
       let turn;try{turn=this.store.append(text,answer.trim(),kinds,conversationId,requestId,instructionUpdate?{content:instructionUpdate}:null);}catch(e){this.growth?.cancel(conversationId);throw e;}
       let confirmed=[];if(this.understanding){try{confirmed=this.understanding.resolve(turn.id);}catch{errors.push('confirmation_failed');}}
       const activeInstruction=this.store.getInstructions(conversationId);
-      return {...turn,pending_growth:this.growth?.getPending(conversationId)??null,event:{growth:growthEvent,session_instruction:activeInstruction?{status:instructionUpdate?'updated':'active',version:activeInstruction.version,characters:Array.from(activeInstruction.content).length}:null,retrieved_memory_ids:memories.map(m=>m.id),retrieved_claim_ids:claims.map(c=>c.id),confirmed_claim_ids:confirmed,queued_job_ids:this.store.jobs(turn.id).map(j=>j.id),memory_search:this.memory?.lastSearch??null,understanding_search:this.understanding?.lastSearch??null,errors}};
+      return {...turn,pending_growth:this.growth?.getPending(conversationId)??null,event:{growth:growthEvent,session_instruction:activeInstruction?{status:instructionUpdate?(previousInstruction?'updated':'pinned'):'active',version:activeInstruction.version,characters:Array.from(activeInstruction.content).length}:null,retrieved_memory_ids:memories.map(m=>m.id),retrieved_claim_ids:claims.map(c=>c.id),confirmed_claim_ids:confirmed,queued_job_ids:this.store.jobs(turn.id).map(j=>j.id),memory_search:this.memory?.lastSearch??null,understanding_search:this.understanding?.lastSearch??null,errors}};
     });
     this.tail=run.catch(()=>{});return run;
   }
