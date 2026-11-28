@@ -35,6 +35,7 @@ try{
     {role:'user',content:'请把下面数据制作成柱状图：一月 2，二月 4，三月 7。标题为每月阅读量。'}
   ],registry,{maxRounds:5,maxCalls:4});
   if(!chart.blocks.some(block=>block.type==='chart'&&block.chartType==='bar'))throw Error('The model did not discover and execute the chart capability');
+  if(!chart.events.some(event=>event.name==='discover_capabilities'&&event.status==='completed')||!chart.events.some(event=>event.name==='chart_create'&&event.status==='completed'))throw Error('The model did not dynamically discover and execute chart_create');
   report.chart_test={answer:chart.answer,events:chart.events,blocks:chart.blocks};
   report.checks.capability_discovery=true;
   report.checks.chart_tool_executed=true;
@@ -47,6 +48,7 @@ try{
   report.diagram_test={answer:diagram.answer,events:diagram.events,blocks:diagram.blocks};
   report.checks.diagram_capability_discovery=diagram.events.some(event=>event.name==='discover_capabilities'&&event.status==='completed');
   report.checks.diagram_tool_executed=!!diagramEvent;
+  if(!report.checks.diagram_capability_discovery)throw Error('The model did not dynamically discover diagram_create');
   report.status='supported';
 }catch(error){
   report.status='unsupported_or_incompatible';
