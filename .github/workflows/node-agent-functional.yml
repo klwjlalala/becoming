@@ -1,0 +1,30 @@
+name: Node agent deterministic tests
+
+on:
+  push:
+    branches:
+      - feat/agent-capabilities-v1
+    paths:
+      - 'agent-runtime/**'
+      - '.github/workflows/node-agent-functional.yml'
+  pull_request:
+    paths:
+      - 'agent-runtime/**'
+      - '.github/workflows/node-agent-functional.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  node-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run Node agent tests
+        run: npm --prefix agent-runtime test
