@@ -62,6 +62,19 @@ test('capability loop preserves streamed preambles and final answers across tool
   assert.equal(result.answer,'我来执行工具。\n\n已经完成。');
   assert.equal(tokens.join(''),'我来执行工具。\n\n已经完成。');
 });
+test('capability loop refuses tools that were not activated through discovery',async()=>{
+  const registry=new CapabilityRegistry();
+  registry.register({name:'hidden_tool',description:'A hidden capability.',category:'test',keywords:['hidden'],parameters:{type:'object',properties:{},additionalProperties:false},handler:()=>({secret:true})});
+  let call=0;
+  const model={completeStructured:async()=>{
+    call++;
+    if(call===1)return {text:'',tool_calls:[{id:'hidden-1',type:'function',function:{name:'hidden_tool',arguments:'{}'}}]};
+    return {text:'The hidden tool was not available.',tool_calls:[]};
+  }};
+  const result=await runCapabilityLoop(model,[{role:'user',content:'Try the hidden tool'}],registry);
+  assert.equal(result.events[0].status,'failed');
+  assert.equal(result.events[0].error,'capability_not_activated');
+});
 test('capability schema rejects missing, extra and invalid values before execution',async()=>{
   const registry=chartRegistry();let calls=0;
   const item=registry.tools.get('chart_create');item.handler=()=>{calls++;return {ok:true};};
