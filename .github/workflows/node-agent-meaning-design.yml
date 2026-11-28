@@ -5,6 +5,7 @@ on:
       - feat/agent-capabilities-v1
     paths:
       - 'agent-runtime/validation/meaning-design-acceptance.mjs'
+      - 'agent-runtime/validation/replay-analysis.mjs'
       - 'agent-runtime/validation/fixtures/meaning-design-*'
       - 'agent-runtime/package.json'
       - 'agent-runtime/prompt.mjs'
