@@ -9,11 +9,13 @@ import {HistoricalMemory} from './memory-search.mjs';
 import {PersonalUnderstanding} from './understanding.mjs';
 import {GrowthStore,GrowthTools} from './growth.mjs';
 import {CapabilityRegistry} from './capabilities/registry.mjs';
+import {AssetStore} from './assets.mjs';
 const port=Number(process.env.BECOMING_LOCAL_PORT||4310);
 const host='127.0.0.1:'+port;
 const path=resolve(process.env.BECOMING_LOCAL_DB||'data/agent-local.sqlite3');
 mkdirSync(dirname(path),{recursive:true});
 const store=new Store(path);
+const assetStore=new AssetStore(store,process.env.BECOMING_ASSET_DIR||path+'.assets');
 const gateway=new Gateway(process.env.BECOMING_GATEWAY||'http://127.0.0.1:8000');
 const memoryMode=process.env.BECOMING_MEMORY_MODE||'lexical';
 if(!['lexical','semantic','historical','improved'].includes(memoryMode))throw Error('Invalid memory mode');
@@ -46,6 +48,30 @@ capabilities.register({
     return {blocks:[{type:'chart',chartType:args.chart_type,title:args.title,labels:args.labels,values:args.values}]};
   }
 });
+if(process.env.BECOMING_IMAGE_MODEL){
+  capabilities.register({
+    name:'image_generate',
+    description:'Generate an original image to illustrate a scene, idea or concept. Use when a visual would materially help the user; describe the intended image precisely.',
+    category:'visualization',
+    keywords:['图片生成','画图','插画','场景图','image generation','illustration','visual'],
+    parameters:{
+      type:'object',
+      properties:{
+        prompt:{type:'string',minLength:8,maxLength:4000},
+        size:{type:'string',enum:['1024x1024','1024x1536','1536x1024']},
+        alt:{type:'string',maxLength:300},
+        caption:{type:'string',maxLength:500}
+      },
+      required:['prompt'],
+      additionalProperties:false
+    },
+    handler:async args=>{
+      const generated=await gateway.generateImage({prompt:args.prompt,size:args.size||'1024x1024'});
+      const asset=assetStore.save(generated.buffer,generated.mime_type);
+      return {asset_id:asset.id,mime_type:asset.mime_type,blocks:[{type:'image',asset_id:asset.id,alt:args.alt||'AI 生成的辅助图片',caption:args.caption||generated.revised_prompt||''}]};
+    }
+  });
+}
 const agent=new Agent(store,gateway,{memory,understanding,growth,capabilities});
 const worker=new BackgroundWorker(store,{'long_memory.extract':id=>{if(!memory)throw Error('Memory disabled');return memory.extract(id);},'personal_understanding.process':id=>{if(!understanding)throw Error('Understanding disabled');return understanding.processTurn(id);}});
 setInterval(()=>{worker.tick().catch(()=>console.error('Background worker tick failed'));},1000).unref();
@@ -61,6 +87,12 @@ createServer(async(req,res)=>{
   res.setHeader('Content-Security-Policy',"default-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'");
   if(req.headers.host!==host||(req.headers.origin&&req.headers.origin!=='http://'+host))return json(res,403,{error:'Forbidden origin'});
   const url=new URL(req.url,'http://'+host),p=url.pathname;
+  if(req.method==='GET'&&p.startsWith('/api/assets/')){
+    const id=p.slice('/api/assets/'.length);
+    const found=assetStore.read(id);if(!found)return json(res,404,{error:'Asset not found'});
+    res.writeHead(200,{'Content-Type':found.asset.mime_type,'Content-Length':found.buffer.length,'Cache-Control':'private, max-age=3600','X-Content-Type-Options':'nosniff'});
+    return res.end(found.buffer);
+  }
   if(req.method==='GET'&&assets.has(p)){
     const [type,file]=assets.get(p);res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store'});return res.end(readFileSync(new URL('../web/'+file,import.meta.url)));
   }
@@ -83,7 +115,7 @@ createServer(async(req,res)=>{
     if(!/^[0-9a-f-]{36}$/i.test(id))return json(res,400,{error:'Invalid request ID'});
     return json(res,200,{turn:store.requestTurn(id)||null});
   }
-  if(req.method==='GET'&&p==='/api/status'){const instruction=store.getInstructions('default');return json(res,200,{jobs:store.jobCounts(),memoryEnabled:!!memory,conversationId:'default',sessionInstruction:instruction?{active:true,version:instruction.version,characters:Array.from(instruction.content).length}: {active:false}});}
+  if(req.method==='GET'&&p==='/api/status'){const instruction=store.getInstructions('default');return json(res,200,{jobs:store.jobCounts(),memoryEnabled:!!memory,conversationId:'default',imageGenerationAvailable:!!process.env.BECOMING_IMAGE_MODEL,sessionInstruction:instruction?{active:true,version:instruction.version,characters:Array.from(instruction.content).length}: {active:false}});}
   if(req.method==='GET'&&p==='/api/memories')return json(res,200,{memories:memory?.list()||[]});
   if(req.method==='GET'&&p==='/api/understanding')return json(res,200,{claims:understanding?.list()||[]});
   if(req.method==='GET'&&p==='/api/jobs')return json(res,200,{jobs:store.jobs()});
