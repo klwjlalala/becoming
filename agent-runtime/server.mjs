@@ -10,6 +10,7 @@ import {PersonalUnderstanding} from './understanding.mjs';
 import {GrowthStore,GrowthTools} from './growth.mjs';
 import {CapabilityRegistry} from './capabilities/registry.mjs';
 import {AssetStore} from './assets.mjs';
+import {registerDefaultCapabilities} from './capabilities/defaults.mjs';
 const port=Number(process.env.BECOMING_LOCAL_PORT||4310);
 const host='127.0.0.1:'+port;
 const path=resolve(process.env.BECOMING_LOCAL_DB||'data/agent-local.sqlite3');
@@ -25,73 +26,7 @@ const growthPath=resolve(process.env.BECOMING_LOCAL_GROWTH_DB||path+'.growth.sql
 if(growthPath===path)throw Error('Growth and transcript databases must be separate');
 mkdirSync(dirname(growthPath),{recursive:true});
 const growth=new GrowthTools(gateway,new GrowthStore(growthPath));
-const capabilities=new CapabilityRegistry();
-growth.registerCapabilities(capabilities);
-capabilities.register({
-  name:'chart_create',
-  description:'Create a visual chart from structured data. Use for comparing values or showing trends; supports bar, line and pie charts.',
-  category:'visualization',
-  keywords:['图表','数据可视化','趋势','比较','chart','visualization'],
-  parameters:{
-    type:'object',
-    properties:{
-      title:{type:'string',minLength:1,maxLength:120},
-      chart_type:{type:'string',enum:['bar','line','pie']},
-      labels:{type:'array',minItems:1,maxItems:16,items:{type:'string',minLength:1,maxLength:80}},
-      values:{type:'array',minItems:1,maxItems:16,items:{type:'number',minimum:0,maximum:1000000}}
-    },
-    required:['title','chart_type','labels','values'],
-    additionalProperties:false
-  },
-  handler:args=>{
-    if(args.labels.length!==args.values.length)throw Error('Chart labels and values must have the same length');
-    return {blocks:[{type:'chart',chartType:args.chart_type,title:args.title,labels:args.labels,values:args.values}]};
-  }
-});
-capabilities.register({
-    name:'image_generate',
-    description:'Generate an original image to illustrate a scene, idea or concept. Use when a visual would materially help the user; describe the intended image precisely.',
-    category:'visualization',
-    keywords:['图片生成','画图','插画','场景图','image generation','illustration','visual'],
-    parameters:{
-      type:'object',
-      properties:{
-        prompt:{type:'string',minLength:8,maxLength:4000},
-        size:{type:'string',enum:['1024x1024','1024x1536','1536x1024']},
-        alt:{type:'string',maxLength:300},
-        caption:{type:'string',maxLength:500}
-      },
-      required:['prompt'],
-      additionalProperties:false
-    },
-    handler:async args=>{
-      const generated=await gateway.generateImage({prompt:args.prompt,size:args.size||'1024x1024'});
-      const asset=assetStore.save(generated.buffer,generated.mime_type);
-      return {asset_id:asset.id,mime_type:asset.mime_type,blocks:[{type:'image',asset_id:asset.id,alt:args.alt||'AI 生成的辅助图片',caption:args.caption||generated.revised_prompt||''}]};
-    }
-});
-capabilities.register({
-  name:'diagram_create',
-  description:'Create a structured relationship or process diagram from labeled nodes and directed connections.',
-  category:'visualization',
-  keywords:['关系图','流程图','思维导图','结构图','diagram','flowchart','mind map'],
-  parameters:{
-    type:'object',
-    properties:{
-      title:{type:'string',minLength:1,maxLength:120},
-      layout:{type:'string',enum:['vertical','horizontal']},
-      nodes:{type:'array',minItems:2,maxItems:10,items:{type:'object',properties:{id:{type:'string',minLength:1,maxLength:24},label:{type:'string',minLength:1,maxLength:48},description:{type:'string',maxLength:80}},required:['id','label'],additionalProperties:false}},
-      edges:{type:'array',maxItems:16,items:{type:'object',properties:{from:{type:'string',minLength:1,maxLength:24},to:{type:'string',minLength:1,maxLength:24},label:{type:'string',maxLength:40}},required:['from','to'],additionalProperties:false}}
-    },
-    required:['title','layout','nodes','edges'],
-    additionalProperties:false
-  },
-  handler:args=>{
-    const ids=new Set(args.nodes.map(node=>node.id));
-    if(ids.size!==args.nodes.length||args.edges.some(edge=>!ids.has(edge.from)||!ids.has(edge.to)||edge.from===edge.to))throw Error('Diagram contains duplicate or unknown node references');
-    return {blocks:[{type:'diagram',title:args.title,layout:args.layout,nodes:args.nodes,edges:args.edges}]};
-  }
-});
+const capabilities=registerDefaultCapabilities({registry:new CapabilityRegistry(),growth,gateway,assetStore});
 const agent=new Agent(store,gateway,{memory,understanding,growth,capabilities});
 const worker=new BackgroundWorker(store,{'long_memory.extract':id=>{if(!memory)throw Error('Memory disabled');return memory.extract(id);},'personal_understanding.process':id=>{if(!understanding)throw Error('Understanding disabled');return understanding.processTurn(id);}});
 setInterval(()=>{worker.tick().catch(()=>console.error('Background worker tick failed'));},1000).unref();
