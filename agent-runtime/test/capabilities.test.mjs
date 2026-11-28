@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {CapabilityRegistry,runCapabilityLoop} from '../capabilities/registry.mjs';
+import {Agent} from '../agent.mjs';
+import {Store} from '../store.mjs';
 
 function chartRegistry(){
   const registry=new CapabilityRegistry();
@@ -70,6 +72,32 @@ test('capability loop enforces call and round limits',async()=>{
   await assert.rejects(runCapabilityLoop(model,[{role:'user',content:'画图'}],registry,{maxCalls:1,maxRounds:2}),/round limit|call limit/);
 });
 
+test('Agent integrates native capability calls and returns generated content blocks',async()=>{
+  const registry=new CapabilityRegistry();
+  registry.register({
+    name:'make_visual',
+    description:'Create a simple visual artifact for the user.',
+    category:'visualization',
+    keywords:['visual','图像','图表'],
+    alwaysAvailable:true,
+    parameters:{type:'object',properties:{label:{type:'string',minLength:1,maxLength:40}},required:['label'],additionalProperties:false},
+    handler:({label})=>({blocks:[{type:'image',asset_id:'asset-test',alt:label}]})
+  });
+  let call=0;
+  const model={completeStructured:async()=>{
+    call++;
+    if(call===1)return {text:'',tool_calls:[{id:'visual-1',type:'function',function:{name:'make_visual',arguments:'{"label":"测试图"}'}}]};
+    return {text:'已经生成测试图。',tool_calls:[]};
+  }};
+  const store=new Store(':memory:'),agent=new Agent(store,model,{capabilities:registry});
+  const turn=await agent.reply('请生成一个简单的视觉示例。');
+  assert.equal(turn.assistant,'已经生成测试图。');
+  assert.equal(turn.content_blocks.length,1);
+  assert.equal(turn.content_blocks[0].asset_id,'asset-test');
+  assert.equal(turn.event.capabilities[0].name,'make_visual');
+  assert.equal(turn.event.capabilities[0].status,'completed');
+  store.close();
+});
 test('registry exposes only enabled capabilities to discovery',()=>{
   const registry=chartRegistry();
   registry.register({name:'disabled_tool',description:'Disabled capability',category:'other',keywords:['disabled'],enabled:false,parameters:{type:'object',properties:{},additionalProperties:false},handler:()=>({})});
