@@ -56,6 +56,8 @@ Python 网关读取以下环境变量：
 
 图像服务需要兼容 `POST /images/generations`，并返回 `data[0].b64_json`。目前接受 PNG、JPEG、WebP，单张图片最大 15 MB。未配置图像模型时，工具会返回明确的未配置错误，不会伪造图片。
 
+配置好图像模型后，可以在 GitHub Actions 的 **Node agent native tool-call probe** 工作流中手动勾选 `probe_image`，执行一次真实出图测试并下载测试图片。该步骤默认关闭，避免在普通 CI 中产生图像生成费用。
+
 ## 当前边界
 
 - 原生工具调用已通过当前配置模型的真实调用验证。
