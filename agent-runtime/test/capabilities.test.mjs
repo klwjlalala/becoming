@@ -52,7 +52,7 @@ test('capability discovery activates a tool and executes native function calls',
 
 test('capability loop preserves streamed preambles and final answers across tool rounds',async()=>{
   const registry=new CapabilityRegistry();let round=0;const tokens=[];
-  registry.register({name:'quick_tool',description:'A simple test capability.',category:'test',keywords:['quick'],parameters:{type:'object',properties:{},additionalProperties:false},handler:()=>({ok:true})});
+  registry.register({name:'quick_tool',description:'A simple test capability.',category:'test',keywords:['quick'],alwaysAvailable:true,parameters:{type:'object',properties:{},additionalProperties:false},handler:()=>({ok:true})});
   const model={streamStructured:async(messages,{onToken})=>{
     round++;
     if(round===1){onToken('我来执行工具。');return {text:'我来执行工具。',streamed:true,tool_calls:[{id:'quick-1',type:'function',function:{name:'quick_tool',arguments:'{}'}}]};}
