@@ -7,6 +7,7 @@ on:
     paths:
       - 'server/app.py'
       - 'agent-runtime/agent.mjs'
+      - 'agent-runtime/capabilities/**'
       - 'agent-runtime/validation/tool-call-probe.mjs'
       - '.github/workflows/node-agent-toolcall-probe.yml'
   workflow_dispatch:
