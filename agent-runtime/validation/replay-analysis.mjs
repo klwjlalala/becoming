@@ -27,7 +27,7 @@ export function analyzeReplay(turns){
   const finalConfirmationResponse=latestSubstantiveUserTurn?.assistant||'';
   const finalConfirmationQuestionMarks=(finalConfirmationResponse.match(/[？?]/g)||[]).length;
   const knownAge=turns.some(turn=>turn.kind==='replayed_user_turn'&&/\d{1,3}\s*岁/u.test(String(turn.user||'')));
-  const reasksKnownAge=knownAge&&/(?:年龄|(?:你|自己)(?:现在|前面)?(?:是)?\s*\d{1,3}\s*岁|按\s*\d{1,3}\s*岁)/u.test(finalConfirmationResponse);
+  const reasksKnownAge=knownAge&&(/\d{1,3}\s*岁[^。！？\\n]{0,20}(?:对吗|可以吗|是吗|吗[？?])/u.test(finalConfirmationResponse)||/(?:年龄|岁数)[^。！？\\n]{0,12}(?:对吗|可以吗|确认)/u.test(finalConfirmationResponse));
   const asksStandaloneFinalConfirmation=/(?:补充|修正)/.test(finalConfirmationResponse)&&finalConfirmationQuestionMarks===1&&!reasksKnownAge&&!/个人意义设计手册/.test(finalConfirmationResponse);
 
   const checks={
