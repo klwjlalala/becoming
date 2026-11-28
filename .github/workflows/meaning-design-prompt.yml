@@ -1,0 +1,83 @@
+name: Meaning design prompt capability evaluation
+
+on:
+  push:
+    branches:
+      - eval/meaning-design-prompt
+    paths:
+      - '.github/workflows/meaning-design-prompt.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: meaning-design-prompt-evaluation
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    if: github.ref == 'refs/heads/eval/meaning-design-prompt'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install gateway dependencies
+        run: python -m pip install -e .
+      - name: Run offline Node regression tests
+        run: npm --prefix agent-runtime test
+      - name: Verify model secrets are present
+        env:
+          BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
+          BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
+          BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for key in BECOMING_BASE_URL BECOMING_API_KEY BECOMING_MODEL; do
+            if [[ -z "${!key}" ]]; then
+              echo "::error::Missing repository secret: $key"
+              exit 1
+            fi
+          done
+          echo "All required model configuration values are present."
+      - name: Start stateless Python model gateway
+        env:
+          BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
+          BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
+          BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
+        run: |
+          python -m uvicorn server.app:app --host 127.0.0.1 --port 8000 >/tmp/becoming-gateway.log 2>&1 &
+          echo $! > /tmp/becoming-gateway.pid
+          for i in {1..50}; do
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then exit 0; fi
+            sleep .2
+          done
+          cat /tmp/becoming-gateway.log
+          exit 1
+      - name: Run real-model multi-turn prompt evaluation
+        env:
+          BECOMING_GATEWAY: http://127.0.0.1:8000
+          MEANING_DESIGN_MAX_CALLS: '16'
+          MEANING_DESIGN_REPORT: agent-runtime/artifacts/meaning-design-prompt.json
+        run: node agent-runtime/validation/meaning-design-prompt.mjs
+      - name: Upload conversation and evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meaning-design-prompt-evaluation
+          path: agent-runtime/artifacts/meaning-design-prompt.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Stop model gateway
+        if: always()
+        run: |
+          if [[ -f /tmp/becoming-gateway.pid ]]; then kill "$(cat /tmp/becoming-gateway.pid)" 2>/dev/null || true; fi
