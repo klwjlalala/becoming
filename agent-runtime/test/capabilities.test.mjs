@@ -95,6 +95,8 @@ test('Agent integrates native capability calls and returns generated content blo
   assert.equal(turn.assistant,'已经生成测试图。');
   assert.equal(turn.content_blocks.length,1);
   assert.equal(turn.content_blocks[0].asset_id,'asset-test');
+  assert.equal(store.history(1)[0].content_blocks[0].asset_id,'asset-test','Generated content blocks must survive history reload');
+  assert.equal(store.turn(turn.id).content_blocks[0].type,'image');
   assert.equal(turn.event.capabilities[0].name,'make_visual');
   assert.equal(turn.event.capabilities[0].status,'completed');
   store.close();
