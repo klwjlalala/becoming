@@ -16,9 +16,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   live:
-    if: >-
-      (github.ref == 'refs/heads/feat/local-agent-web' || github.ref == 'refs/heads/feat/ai-friend-web-v1') &&
-      (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.event.head_commit.message == 'fix: enforce explicit tool invocation and guide understanding retries' || github.event.head_commit.message == 'test: run AI friend real-model web smoke' || github.event.head_commit.message == 'test: evaluate AI friend long session')))
+    if: github.ref == 'refs/heads/feat/local-agent-web' || github.ref == 'refs/heads/feat/ai-friend-web-v1'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -38,10 +36,12 @@ jobs:
           BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
           BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
           BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
-          SUITE: ${{ inputs.suite || (github.event_name == 'push' && github.event.head_commit.message == 'test: evaluate AI friend long session' && 'long-session') || 'web-smoke' }}
+          SUITE: ${{ inputs.suite || 'web-smoke' }}
+          LONG_SESSION_PUSH: ${{ github.event_name == 'push' && github.event.head_commit.message == 'test: evaluate AI friend long session' }}
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$LONG_SESSION_PUSH" == "true" ]]; then SUITE=long-session; fi
           for k in BECOMING_BASE_URL BECOMING_API_KEY BECOMING_MODEL; do
             if [[ -z "${!k}" ]]; then echo "::error::Missing repository secret: $k"; exit 1; fi
           done

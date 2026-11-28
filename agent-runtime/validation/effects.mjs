@@ -11,7 +11,7 @@ export function validateFixtures(){
 }
 const validation=validateFixtures();console.log('Fixture validation:',JSON.stringify(validation));
 if(process.argv.includes('--live')){
- const mode=process.env.BECOMING_EFFECT_MODE||'longitudinal',model=new BudgetedModel(mode==='longitudinal'?70:80),report={mode,validation,fictional_data_only:true,automatic_quality_verdict:null,model_calls:0,results:[]};
+ const mode=process.env.BECOMING_EFFECT_MODE||'longitudinal',model=new BudgetedModel(mode==='longitudinal'?70:mode==='long-session'?100:80),report={mode,validation,fictional_data_only:true,automatic_quality_verdict:null,model_calls:0,results:[]};
  const out=process.env.BECOMING_REPORT||'artifacts/node-effects.json';
  function save(){report.model_calls=model.calls;report.max_calls=model.limit;report.call_durations_ms=model.timings;report.trace=model.trace;mkdirSync(dirname(out),{recursive:true});writeFileSync(out,JSON.stringify(report,null,2)+'\n');}
  try{
