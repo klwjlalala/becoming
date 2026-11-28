@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {analyzeReplay} from '../validation/replay-analysis.mjs';
 
 const handbook=[
-  '# 《个人意义设计手册》',
+  '# 个人意义设计手册',
   '## 你在这里',
   '## 你早就拥有的意义',
   '## 被你忽略的部分',
