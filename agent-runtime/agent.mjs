@@ -1,5 +1,6 @@
 import {SYSTEM_PROMPT} from './prompt.mjs';
 import {isUrgent} from './understanding.mjs';
+import {runCapabilityLoop} from './capabilities/registry.mjs';
 
 function aborted(){const error=new Error('Request cancelled');error.name='AbortError';return error;}
 function combinedSignal(signal){
@@ -109,10 +110,10 @@ async function modelText(model,messages,{signal,onToken}={}){
   return answer;
 }
 export class Agent{
-  constructor(store,model,{memory=null,understanding=null,growth=null,historyTurns=12}={}){
+  constructor(store,model,{memory=null,understanding=null,growth=null,capabilities=null,historyTurns=12}={}){
     if(!Number.isInteger(historyTurns)||historyTurns<0||historyTurns>12)throw Error('Invalid history window');
     if([memory,understanding].some(m=>m&&m.store!==store))throw Error('Agent and memory must share store');
-    this.historyTurns=historyTurns;this.store=store;this.model=model;this.memory=memory;this.understanding=understanding;this.growth=growth;this.tail=Promise.resolve();
+    this.historyTurns=historyTurns;this.store=store;this.model=model;this.memory=memory;this.understanding=understanding;this.growth=growth;this.capabilities=capabilities;this.tail=Promise.resolve();
   }
   reply(input,conversationId='default',options={}){return this.replyStream(input,conversationId,options);}
   replyStream(input,conversationId='default',{signal,onToken,requestId=null}={}){
@@ -160,9 +161,12 @@ export class Agent{
       const instructionSourceIds=new Set(this.store.instructionSourceIds(conversationId));
       const history=this.store.history(this.historyTurns,conversationId);
       const messages=[{role:'system',content:system},...history.flatMap(t=>instructionSourceIds.has(t.id)?[{role:'assistant',content:t.assistant}]:[{role:'user',content:t.user},{role:'assistant',content:t.assistant}]),{role:'user',content:modelInput}];
-      let answer,growthEvent=null;
+      let answer,growthEvent=null,capabilityEvents=[],contentBlocks=[];
       if(this.growth){const result=await this.growth.complete(messages,conversationId,{signal,onToken});answer=result.answer;growthEvent=result.event;}
-      else answer=await modelText(this.model,messages,{signal,onToken});
+      else if(this.capabilities){
+        const result=await runCapabilityLoop(this.model,messages,this.capabilities,{signal,onToken,conversationId});
+        answer=result.answer;capabilityEvents=result.events;contentBlocks=result.blocks;
+      }else answer=await modelText(this.model,messages,{signal,onToken});
       if(signal?.aborted)throw aborted();
       if(typeof answer!=='string'||!answer.trim())throw Error('Invalid model response');
       const kinds=[];if(!instructionUpdate&&this.memory)kinds.push('long_memory.extract');if(!instructionUpdate&&this.understanding)kinds.push({kind:'personal_understanding.process',priority:isUrgent(text)?10:0});
@@ -170,7 +174,7 @@ export class Agent{
       let turn;try{turn=this.store.append(text,answer.trim(),kinds,conversationId,requestId,instructionUpdate?{content:instructionUpdate}:null);}catch(e){this.growth?.cancel(conversationId);throw e;}
       let confirmed=[];if(this.understanding){try{confirmed=this.understanding.resolve(turn.id);}catch{errors.push('confirmation_failed');}}
       const activeInstruction=this.store.getInstructions(conversationId);
-      return {...turn,pending_growth:this.growth?.getPending(conversationId)??null,event:{growth:growthEvent,session_instruction:activeInstruction?{status:instructionUpdate?(previousInstruction?'updated':'pinned'):'active',version:activeInstruction.version,characters:Array.from(activeInstruction.content).length}:null,retrieved_memory_ids:memories.map(m=>m.id),retrieved_claim_ids:claims.map(c=>c.id),confirmed_claim_ids:confirmed,queued_job_ids:this.store.jobs(turn.id).map(j=>j.id),memory_search:this.memory?.lastSearch??null,understanding_search:this.understanding?.lastSearch??null,errors}};
+      return {...turn,content_blocks:contentBlocks,pending_growth:this.growth?.getPending(conversationId)??null,event:{growth:growthEvent,capabilities:capabilityEvents,session_instruction:activeInstruction?{status:instructionUpdate?(previousInstruction?'updated':'pinned'):'active',version:activeInstruction.version,characters:Array.from(activeInstruction.content).length}:null,retrieved_memory_ids:memories.map(m=>m.id),retrieved_claim_ids:claims.map(c=>c.id),confirmed_claim_ids:confirmed,queued_job_ids:this.store.jobs(turn.id).map(j=>j.id),memory_search:this.memory?.lastSearch??null,understanding_search:this.understanding?.lastSearch??null,errors}};
     });
     this.tail=run.catch(()=>{});return run;
   }
