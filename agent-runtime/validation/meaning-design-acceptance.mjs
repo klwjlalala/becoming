@@ -5,6 +5,7 @@ import {Store} from '../store.mjs';
 import {CapabilityRegistry} from '../capabilities/registry.mjs';
 import {registerDefaultCapabilities} from '../capabilities/defaults.mjs';
 import {AssetStore} from '../assets.mjs';
+import {analyzeReplay} from './replay-analysis.mjs';
 
 const fixture=JSON.parse(readFileSync(new URL('./fixtures/meaning-design-dialogue.json',import.meta.url),'utf8'));
 const prompt=readFileSync(new URL('./fixtures/meaning-design-prompt.txt',import.meta.url),'utf8').trim();
@@ -94,21 +95,13 @@ try{
   }
 
   const firstAnswer=report.turns[0].assistant||'';
-  const final=report.turns.at(-1).assistant||'';
-  const compactFinal=Array.from(final.replace(/\s/g,'')).length;
-  const sectionPatterns=[
-    ['你在这里',/你在这里/],
-    ['你早就拥有的意义',/你早就拥有的意义|早已拥有的意义/],
-    ['被你忽略的部分',/被你忽略的部分|你可能忽略的部分/],
-    ['你的人生罗盘',/你的人生罗盘|人生罗盘/],
-    ['设计更多意义时刻',/设计更多意义时刻|亲手设计更多|更多有意义的时刻/],
-    ['带着问题生活',/带着问题生活/],
-    ['陪你一起变好的人',/陪你一起变好的人|一起变好的人/],
-    ['你的人生季节',/你的人生季节|人生季节/],
-  ];
-  const missingSections=sectionPatterns.filter(([,pattern])=>!pattern.test(final)).map(([name])=>name);
-  const tableLines=final.split('\n').filter(line=>/^\s*\|.*\|\s*$/.test(line));
-  const ending=final.trim().slice(-500);
+  const analysis=analyzeReplay(report.turns);
+  const handbookTurn=report.turns.find(turn=>turn.index===analysis.handbook_turn_index)||null;
+  const final=handbookTurn?.assistant||'';
+  const compactFinal=analysis.handbook_characters_without_whitespace;
+  const missingSections=analysis.handbook_missing_sections;
+  const tableLines=final.split('\\n').filter(line=>/^\\s*\\|.*\\|\\s*$/.test(line));
+  const ending=analysis.handbook_ending_excerpt;
   const questionMarks=(firstAnswer.match(/[？?]/g)||[]).length;
   const lastModelCall=[...gateway.trace].reverse().find(call=>call.last_user_input===fixture.answers.at(-1));
   const history=store.history(12,'default');
@@ -129,6 +122,7 @@ try{
   check('all_12_user_answers_replayed',report.turns.length===fixture.answers.length+1&&history.length===12);
   check('all_user_answers_preserved_in_order',history.every((turn,index)=>turn.user===fixture.answers[index]));
   check('prompt_survives_history_window_rollover',!history.some(turn=>turn.user===prompt)&&!!lastModelCall?.system_contains_prompt);
+  for(const [name,result] of Object.entries(analysis.checks))check(name,result.passed,result.detail??null);
   check('final_response_is_personal_meaning_handbook',/个人意义设计手册/.test(final));
   check('final_response_length_5000_to_7000_characters',compactFinal>=5000&&compactFinal<=7000,{characters_without_whitespace:compactFinal});
   check('final_response_covers_all_eight_named_sections',missingSections.length===0,{missing_sections:missingSections});
@@ -137,13 +131,41 @@ try{
   check('final_response_reflects_fixture_evidence',themeChecks.every(([,passed])=>passed),{themes:themeChecks.map(([name,passed])=>({name,passed}))});
   check('no_tool_execution_failures',report.summary.failed_tools===0,{failed_tools:report.summary.failed_tools});
   check('no_unconfirmed_growth_mutations',report.turns.every(turn=>!turn.pending_growth));
+  const revisionConversation=store.createConversation('artifact-revision').id;
+  const revisionRequest='请为一位零基础成人制定一份为期3天的 JavaScript 入门学习计划，每天只有30分钟。每一天都要写清学习目标、具体练习和验收标准。';
+  const revisionDraft=await agent.reply(revisionRequest,revisionConversation);
+  const revisionInput='补充一个重要情况：我已经掌握 HTML 和 CSS，但没有 JavaScript 经验；另外我只能使用手机学习，没有电脑。每天30分钟这个条件不变。';
+  const revisionTurn=await agent.reply(revisionInput,revisionConversation);
+  const revisedPlan=revisionTurn.assistant||'';
+  const revisionChecks={
+    substantive_revision:{passed:Array.from(revisedPlan).length>=350,detail:{characters:Array.from(revisedPlan).length}},
+    retains_three_day_structure:{passed:/第一天|第1天|Day\\s*1/i.test(revisedPlan)&&/第二天|第2天|Day\\s*2/i.test(revisedPlan)&&/第三天|第3天|Day\\s*3/i.test(revisedPlan)},
+    adapts_to_mobile_only_constraint:{passed:/手机|移动端|手机端/.test(revisedPlan)},
+    preserves_daily_time_limit:{passed:/30\\s*分钟|30分钟|半小时/.test(revisedPlan)},
+    uses_existing_html_css_knowledge:{passed:/HTML|CSS/.test(revisedPlan)},
+    includes_actionable_practice:{passed:/练习|实践|操作|编写/.test(revisedPlan)}
+  };
+  report.artifact_revision={
+    conversation_id:revisionConversation,
+    initial_request:revisionRequest,
+    initial_draft_characters:Array.from(revisionDraft.assistant||'').length,
+    follow_up:revisionInput,
+    updated_response:revisedPlan,
+    checks:revisionChecks
+  };
+  for(const [name,result] of Object.entries(revisionChecks))check('artifact_revision_'+name,result.passed,result.detail??null);
   check('model_call_budget_respected',gateway.calls<=maxCalls,{model_calls:gateway.calls,max_calls:maxCalls});
 
+
+  report.handbook_analysis=analysis;
   report.final_characters_without_whitespace=compactFinal;
   report.missing_sections=missingSections;
   report.final_table_lines=tableLines.length;
   report.final_ending_excerpt=ending.slice(-180);
   report.final_response=final;
+  report.summary.model_calls=gateway.calls;
+  report.summary.tool_calls=report.turns.reduce((sum,turn)=>sum+(turn.event?.capabilities?.length||0),0);
+  report.summary.failed_tools=report.turns.reduce((sum,turn)=>sum+(turn.event?.capabilities||[]).filter(event=>event.status==='failed').length,0);
   report.status=Object.values(report.checks).every(item=>item.passed)?'passed':'needs_review';
   save();
   console.log(JSON.stringify({status:report.status,model_calls:gateway.calls,max_calls:maxCalls,turns:fixture.answers.length,final_characters_without_whitespace:compactFinal,checks:report.checks,report:output},null,2));
