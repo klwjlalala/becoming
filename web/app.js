@@ -143,11 +143,41 @@ function renderChartBlock(block){
   }
   figure.append(svg);return figure;
 }
+function renderDiagramBlock(block){
+  const nodes=Array.isArray(block.nodes)?block.nodes:[],edges=Array.isArray(block.edges)?block.edges:[];
+  if(nodes.length<2||nodes.length>10)return null;
+  const horizontal=block.layout==='horizontal',boxW=horizontal?176:270,boxH=72,gap=horizontal?42:34;
+  const width=horizontal?48+nodes.length*(boxW+gap):680,height=horizontal?250:48+nodes.length*(boxH+gap);
+  const positions=new Map();
+  nodes.forEach((node,index)=>positions.set(node.id,horizontal?{x:24+index*(boxW+gap),y:(height-boxH)/2}:{x:(width-boxW)/2,y:24+index*(boxH+gap)}));
+  const figure=document.createElement('figure');figure.className='agent-diagram-card';
+  if(block.title){const title=document.createElement('figcaption');title.className='agent-chart-title';title.textContent=block.title;figure.append(title);}
+  const svg=svgNode('svg',{viewBox:`0 0 ${width} ${height}`,role:'img','aria-label':block.title||'关系图',class:'agent-diagram-svg'});
+  const defs=svgNode('defs'),markerId='diagram-arrow-'+crypto.randomUUID().replace(/-/g,'');
+  const marker=svgNode('marker',{id:markerId,markerWidth:8,markerHeight:8,refX:7,refY:4,orient:'auto',markerUnits:'strokeWidth'});
+  marker.append(svgNode('path',{d:'M0,0 L8,4 L0,8 Z',class:'agent-diagram-arrow'}));defs.append(marker);svg.append(defs);
+  for(const edge of edges){
+    const from=positions.get(edge.from),to=positions.get(edge.to);if(!from||!to)continue;
+    const x1=from.x+boxW/2,y1=from.y+boxH/2,x2=to.x+boxW/2,y2=to.y+boxH/2;
+    svg.append(svgNode('line',{x1,y1,x2,y2,class:'agent-diagram-edge','marker-end':`url(#${markerId})`}));
+    if(edge.label){const label=svgNode('text',{x:(x1+x2)/2,y:(y1+y2)/2-8,'text-anchor':'middle',class:'agent-diagram-edge-label'});label.textContent=String(edge.label).slice(0,40);svg.append(label);}
+  }
+  for(const node of nodes){
+    const pos=positions.get(node.id),group=svgNode('g',{class:'agent-diagram-node-group'});
+    group.append(svgNode('rect',{x:pos.x,y:pos.y,width:boxW,height:boxH,rx:12,class:'agent-diagram-node'}));
+    const label=svgNode('text',{x:pos.x+boxW/2,y:pos.y+29,'text-anchor':'middle',class:'agent-diagram-label'});label.textContent=String(node.label).slice(0,48);group.append(label);
+    if(node.description){const desc=svgNode('text',{x:pos.x+boxW/2,y:pos.y+51,'text-anchor':'middle',class:'agent-diagram-description'});desc.textContent=String(node.description).slice(0,34);group.append(desc);}
+    svg.append(group);
+  }
+  figure.append(svg);return figure;
+}
 function renderContentBlocks(container,blocks=[]){
   for(const block of blocks){
     if(!block||typeof block!=='object')continue;
     if(block.type==='chart'){
       const chart=renderChartBlock(block);if(chart)container.append(chart);
+    }else if(block.type==='diagram'){
+      const diagram=renderDiagramBlock(block);if(diagram)container.append(diagram);
     }else if(block.type==='image'){
       const src=typeof block.asset_id==='string'?'/api/assets/'+encodeURIComponent(block.asset_id):(typeof block.src==='string'&&block.src.startsWith('/api/assets/')?block.src:null);
       if(!src)continue;
