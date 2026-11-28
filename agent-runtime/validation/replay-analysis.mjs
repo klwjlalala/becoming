@@ -26,7 +26,9 @@ export function analyzeReplay(turns){
   const artifactAfterLatestInput=!!handbookTurn&&(!latestSubstantiveUserTurn||handbookTurn.index>=latestSubstantiveUserTurn.index);
   const finalConfirmationResponse=latestSubstantiveUserTurn?.assistant||'';
   const finalConfirmationQuestionMarks=(finalConfirmationResponse.match(/[？?]/g)||[]).length;
-  const asksStandaloneFinalConfirmation=/补充|修正|确认/.test(finalConfirmationResponse)&&finalConfirmationQuestionMarks===1&&!/个人意义设计手册/.test(finalConfirmationResponse);
+  const knownAge=turns.some(turn=>turn.kind==='replayed_user_turn'&&/\\d{1,3}\\s*岁/u.test(String(turn.user||'')));
+  const reasksKnownAge=knownAge&&/(?:年龄|(?:你|自己)(?:现在|前面)?(?:是)?\\s*\\d{1,3}\\s*岁|按\\s*\\d{1,3}\\s*岁)/u.test(finalConfirmationResponse);
+  const asksStandaloneFinalConfirmation=/(?:补充|修正)/.test(finalConfirmationResponse)&&finalConfirmationQuestionMarks===1&&!reasksKnownAge&&!/个人意义设计手册/.test(finalConfirmationResponse);
 
   const checks={
     personal_meaning_handbook_generated:{passed:!!handbookTurn,detail:{turn_index:handbookTurn?.index??null}},
@@ -37,7 +39,8 @@ export function analyzeReplay(turns){
     handbook_generated_after_last_substantive_user_turn:{passed:artifactAfterLatestInput,detail:{handbook_turn_index:handbookTurn?.index??null,latest_substantive_user_turn_index:latestSubstantiveUserTurn?.index??null,final_turn_index:finalTurn?.index??null}},
     handbook_generated_after_closure_signal:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||handbookTurn?.index===finalTurn.index,detail:{first_handbook_turn_index:firstHandbookTurn?.index??null,latest_handbook_turn_index:handbookTurn?.index??null,final_turn_index:finalTurn?.index??null,final_turn_is_closure:isConversationClosure(finalTurn?.user)}},
     handbook_not_prematurely_delivered:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||!firstHandbookTurn||firstHandbookTurn.index===finalTurn.index||/(?:草稿|初稿|阶段性版本)/.test((firstHandbookTurn.assistant||'').slice(0,180)),detail:{first_handbook_turn_index:firstHandbookTurn?.index??null,final_turn_index:finalTurn?.index??null,final_turn_is_closure:isConversationClosure(finalTurn?.user),first_handbook_is_explicitly_draft:!!firstHandbookTurn&&/(?:草稿|初稿|阶段性版本)/.test((firstHandbookTurn.assistant||'').slice(0,180))}},
-    standalone_final_confirmation_was_requested:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||asksStandaloneFinalConfirmation,detail:{latest_substantive_user_turn_index:latestSubstantiveUserTurn?.index??null,confirmation_question_marks:finalConfirmationQuestionMarks,contains_confirmation_language:/补充|修正|确认/.test(finalConfirmationResponse),response_excerpt:finalConfirmationResponse.slice(0,240)}}
+    known_age_was_not_reconfirmed:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||!knownAge||!reasksKnownAge,detail:{known_age_from_user:knownAge,reasks_known_age:reasksKnownAge,response_excerpt:finalConfirmationResponse.slice(0,240)}},
+    standalone_final_confirmation_was_requested:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||asksStandaloneFinalConfirmation,detail:{latest_substantive_user_turn_index:latestSubstantiveUserTurn?.index??null,confirmation_question_marks:finalConfirmationQuestionMarks,contains_addition_question:/补充|修正/.test(finalConfirmationResponse),known_age_from_user:knownAge,reasks_known_age:reasksKnownAge,response_excerpt:finalConfirmationResponse.slice(0,240)}}
   };
   return {
     handbook_turn_index:handbookTurn?.index??null,
@@ -55,6 +58,8 @@ export function analyzeReplay(turns){
     final_turn_is_closure:isConversationClosure(finalTurn?.user),
     final_confirmation_response:finalConfirmationResponse,
     final_confirmation_question_marks:finalConfirmationQuestionMarks,
+    known_age_from_user:knownAge,
+    reasks_known_age:reasksKnownAge,
     checks
   };
 }
