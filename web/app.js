@@ -27,7 +27,7 @@ function makeButton(label,className,handler){
   button.addEventListener('click',handler);return button;
 }
 function appendInline(parent,text){
-  const pattern=/(!\\[[^\\]]*\\]\\([^)]+\\)|\\*\\*[^*]+\\*\\*|~~[^~]+~~|`[^`]+`|\\*[^*]+\\*|\\[[^\\]]+\\]\\([^)]+\\))/g;
+  const pattern=/(!\[[^\]]*\]\([^)]+\)|\*\*[^*]+\*\*|~~[^~]+~~|`[^`]+`|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
   let last=0,match;
   while((match=pattern.exec(text))){
     if(match.index>last)parent.append(document.createTextNode(text.slice(last,match.index)));
@@ -38,7 +38,7 @@ function appendInline(parent,text){
     else if(value.startsWith('`')){const el=document.createElement('code');el.textContent=value.slice(1,-1);parent.append(el);}
     else if(value.startsWith('*')){const el=document.createElement('em');el.textContent=value.slice(1,-1);parent.append(el);}
     else{
-      const link=value.match(/^\\[([^\\]]+)\\]\\(([^)]+)\\)$/),anchor=document.createElement('a');
+      const link=value.match(/^\[([^\]]+)\]\(([^)]+)\)$/),anchor=document.createElement('a');
       let href=null;try{const parsed=new URL(link[2],location.origin);if(parsed.protocol==='http:'||parsed.protocol==='https:')href=parsed.href;}catch{}
       if(href){anchor.href=href;anchor.target='_blank';anchor.rel='noopener noreferrer';anchor.textContent=link[1];parent.append(anchor);}
       else parent.append(document.createTextNode(value));
@@ -47,24 +47,24 @@ function appendInline(parent,text){
   }
   if(last<text.length)parent.append(document.createTextNode(text.slice(last)));
 }
-function markdownTableCells(line){return line.trim().replace(/^\\|/,'').replace(/\\|$/,'').split('|').map(cell=>cell.trim());}
-function isMarkdownTableDivider(line){return /^\\s*\\|?\\s*:?-{3,}:?\\s*(?:\\|\\s*:?-{3,}:?\\s*)+\\|?\\s*$/.test(line);}
+function markdownTableCells(line){return line.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(cell=>cell.trim());}
+function isMarkdownTableDivider(line){return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);}
 function renderMarkdown(text){
   const root=document.createElement('div');root.className='markdown-content';
-  const lines=String(text||'').replace(/\\r\\n/g,'\\n').split('\\n');
+  const lines=String(text||'').replace(/\r\n/g,'\n').split('\n');
   let i=0;
   while(i<lines.length){
     const line=lines[i];
     if(!line.trim()){i++;continue;}
-    if(/^\\s*```/.test(line)){
+    if(/^\s*```/.test(line)){
       const language=line.trim().slice(3).trim(),parts=[];i++;
-      while(i<lines.length&&!/^\\s*```/.test(lines[i]))parts.push(lines[i++]);
+      while(i<lines.length&&!/^\s*```/.test(lines[i]))parts.push(lines[i++]);
       if(i<lines.length)i++;
-      const pre=document.createElement('pre'),code=document.createElement('code');if(language)code.dataset.language=language;code.textContent=parts.join('\\n');pre.append(code);root.append(pre);continue;
+      const pre=document.createElement('pre'),code=document.createElement('code');if(language)code.dataset.language=language;code.textContent=parts.join('\n');pre.append(code);root.append(pre);continue;
     }
-    const heading=line.match(/^\\s*(#{1,6})\\s+(.+)$/);
+    const heading=line.match(/^\s*(#{1,6})\s+(.+)$/);
     if(heading){const el=document.createElement('h'+heading[1].length);appendInline(el,heading[2]);root.append(el);i++;continue;}
-    if(/^\\s*(?:---+|\\*\\*\\*|___)\\s*$/.test(line)){root.append(document.createElement('hr'));i++;continue;}
+    if(/^\s*(?:---+|\*\*\*|___)\s*$/.test(line)){root.append(document.createElement('hr'));i++;continue;}
     if(i+1<lines.length&&line.includes('|')&&isMarkdownTableDivider(lines[i+1])){
       const table=document.createElement('table'),thead=document.createElement('thead'),tbody=document.createElement('tbody'),header=markdownTableCells(line),headRow=document.createElement('tr');
       for(const value of header){const cell=document.createElement('th');appendInline(cell,value);headRow.append(cell);}
@@ -76,21 +76,21 @@ function renderMarkdown(text){
       }
       table.append(thead,tbody);root.append(table);continue;
     }
-    if(/^\\s*(?:[-*+]\\s+|\\d+\\.\\s+)/.test(line)){
-      const ordered=/^\\s*\\d+\\.\\s+/.test(line),list=document.createElement(ordered?'ol':'ul');
-      while(i<lines.length&&/^\\s*(?:[-*+]\\s+|\\d+\\.\\s+)/.test(lines[i])){
-        const item=lines[i++].replace(/^\\s*(?:[-*+]\\s+|\\d+\\.\\s+)/,'');
+    if(/^\s*(?:[-*+]\s+|\d+\.\s+)/.test(line)){
+      const ordered=/^\s*\d+\.\s+/.test(line),list=document.createElement(ordered?'ol':'ul');
+      while(i<lines.length&&/^\s*(?:[-*+]\s+|\d+\.\s+)/.test(lines[i])){
+        const item=lines[i++].replace(/^\s*(?:[-*+]\s+|\d+\.\s+)/,'');
         const li=document.createElement('li');appendInline(li,item);list.append(li);
       }
       root.append(list);continue;
     }
-    if(/^\\s*>/.test(line)){
+    if(/^\s*>/.test(line)){
       const quote=document.createElement('blockquote'),parts=[];
-      while(i<lines.length&&/^\\s*>/.test(lines[i]))parts.push(lines[i++].replace(/^\\s*>\\s?/,''));
+      while(i<lines.length&&/^\s*>/.test(lines[i]))parts.push(lines[i++].replace(/^\s*>\s?/,''));
       const paragraph=document.createElement('p');appendInline(paragraph,parts.join(' '));quote.append(paragraph);root.append(quote);continue;
     }
     const parts=[line.trim()];i++;
-    while(i<lines.length&&lines[i].trim()&&!/^\\s*(?:#{1,6}\\s|```|>|[-*+]\\s+|\\d+\\.\\s+)/.test(lines[i])&&!/^\\s*(?:---+|\\*\\*\\*|___)\\s*$/.test(lines[i])){
+    while(i<lines.length&&lines[i].trim()&&!/^\s*(?:#{1,6}\s|```|>|[-*+]\s+|\d+\.\s+)/.test(lines[i])&&!/^\s*(?:---+|\*\*\*|___)\s*$/.test(lines[i])){
       if(i+1<lines.length&&lines[i].includes('|')&&isMarkdownTableDivider(lines[i+1]))break;
       parts.push(lines[i].trim());i++;
     }
