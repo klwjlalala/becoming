@@ -21,7 +21,9 @@ test('structured prompts persist as conversation instructions beyond the history
  assert.equal(store.getInstructions().source_turn_id,first.id);
  assert.ok(calls[0][0].content.includes(prompt));
  assert.equal(calls[0].at(-1).content,'请开始执行本次会话指令。');
- for(let i=0;i<5;i++)await agent.reply('第'+i+'轮用户补充');
+ await agent.reply('第一轮用户回答');
+ assert.ok(calls[1].some(message=>message.role==='assistant'&&message.content==='收到'),'The assistant question following a pinned prompt must remain in context');
+ for(let i=0;i<4;i++)await agent.reply('第'+i+'轮用户补充');
  const last=calls.at(-1);
  assert.ok(last[0].content.includes(prompt),'Pinned instruction disappeared after the recent-history window rolled over');
  assert.ok(!last.some(message=>message.content===prompt),'Original prompt was duplicated in transcript history');
