@@ -25,6 +25,27 @@ mkdirSync(dirname(growthPath),{recursive:true});
 const growth=new GrowthTools(gateway,new GrowthStore(growthPath));
 const capabilities=new CapabilityRegistry();
 growth.registerCapabilities(capabilities);
+capabilities.register({
+  name:'chart_create',
+  description:'Create a visual chart from structured data. Use for comparing values or showing trends; supports bar, line and pie charts.',
+  category:'visualization',
+  keywords:['图表','数据可视化','趋势','比较','chart','visualization'],
+  parameters:{
+    type:'object',
+    properties:{
+      title:{type:'string',minLength:1,maxLength:120},
+      chart_type:{type:'string',enum:['bar','line','pie']},
+      labels:{type:'array',minItems:1,maxItems:16,items:{type:'string',minLength:1,maxLength:80}},
+      values:{type:'array',minItems:1,maxItems:16,items:{type:'number',minimum:0,maximum:1000000}}
+    },
+    required:['title','chart_type','labels','values'],
+    additionalProperties:false
+  },
+  handler:args=>{
+    if(args.labels.length!==args.values.length)throw Error('Chart labels and values must have the same length');
+    return {blocks:[{type:'chart',chartType:args.chart_type,title:args.title,labels:args.labels,values:args.values}]};
+  }
+});
 const agent=new Agent(store,gateway,{memory,understanding,growth,capabilities});
 const worker=new BackgroundWorker(store,{'long_memory.extract':id=>{if(!memory)throw Error('Memory disabled');return memory.extract(id);},'personal_understanding.process':id=>{if(!understanding)throw Error('Understanding disabled');return understanding.processTurn(id);}});
 setInterval(()=>{worker.tick().catch(()=>console.error('Background worker tick failed'));},1000).unref();
