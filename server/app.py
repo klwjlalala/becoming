@@ -1,6 +1,7 @@
 """Development-only stateless LLM gateway. The agent lives entirely in Node."""
 import json
 import os
+import re
 from typing import Literal
 from urllib.request import Request, build_opener
 from urllib.parse import urlparse
@@ -39,7 +40,7 @@ class Completion(BaseModel):
                 if not isinstance(item,dict) or set(item)!={"type","function"} or item.get("type")!="function":
                     raise ValueError("Invalid tool definition")
                 fn=item.get("function")
-                if not isinstance(fn,dict) or not isinstance(fn.get("name"),str) or not __import__("re").fullmatch(r"[A-Za-z0-9_-]{1,64}",fn["name"]):
+                if not isinstance(fn,dict) or not isinstance(fn.get("name"),str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}",fn["name"]):
                     raise ValueError("Invalid tool name")
                 if fn["name"] in names:
                     raise ValueError("Duplicate tool name")
@@ -63,7 +64,7 @@ def health(): return {"ok":True}
 
 @app.post("/v1/llm/complete")
 def llm(request: Completion):
-    if sum(len(m.content) for m in request.messages)>500000:
+    if sum(len(m.content or '') for m in request.messages)>500000:
         raise HTTPException(413,"Context too large")
     try:
         base=os.environ.get("BECOMING_BASE_URL",os.environ.get("BECOMING_MODEL_BASE_URL","https://api.openai.com/v1"))
@@ -85,7 +86,9 @@ def llm(request: Completion):
         if not isinstance(content,str) or len(content)>64000 or not isinstance(tool_calls,list) or len(tool_calls)>16 or (not content.strip() and not tool_calls):
             raise ValueError("Invalid model response")
         for call in tool_calls:
-            fn=call.get("function") if isinstance(call,dict) else None
+            if not isinstance(call,dict):
+                raise ValueError("Invalid tool call response")
+            fn=call.get("function")
             if not isinstance(call.get("id"),str) or call.get("type")!="function" or not isinstance(fn,dict) or not isinstance(fn.get("name"),str) or not isinstance(fn.get("arguments"),str) or len(fn["arguments"])>12000:
                 raise ValueError("Invalid tool call response")
         return {"text":content.strip(),"tool_calls":tool_calls,"finish_reason":choice.get("finish_reason"),"usage":result.get("usage")}
