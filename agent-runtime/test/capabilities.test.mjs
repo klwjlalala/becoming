@@ -50,6 +50,18 @@ test('capability discovery activates a tool and executes native function calls',
   assert.equal(result.blocks[0].values[2],7);
 });
 
+test('capability loop preserves streamed preambles and final answers across tool rounds',async()=>{
+  const registry=new CapabilityRegistry();let round=0;const tokens=[];
+  registry.register({name:'quick_tool',description:'A simple test capability.',category:'test',keywords:['quick'],parameters:{type:'object',properties:{},additionalProperties:false},handler:()=>({ok:true})});
+  const model={streamStructured:async(messages,{onToken})=>{
+    round++;
+    if(round===1){onToken('我来执行工具。');return {text:'我来执行工具。',streamed:true,tool_calls:[{id:'quick-1',type:'function',function:{name:'quick_tool',arguments:'{}'}}]};}
+    onToken('已经完成。');return {text:'已经完成。',streamed:true,tool_calls:[]};
+  }};
+  const result=await runCapabilityLoop(model,[{role:'user',content:'执行一下'}],registry,{onToken:token=>tokens.push(token)});
+  assert.equal(result.answer,'我来执行工具。\\n\\n已经完成。');
+  assert.equal(tokens.join(''),'我来执行工具。\\n\\n已经完成。');
+});
 test('capability schema rejects missing, extra and invalid values before execution',async()=>{
   const registry=chartRegistry();let calls=0;
   const item=registry.tools.get('chart_create');item.handler=()=>{calls++;return {ok:true};};
