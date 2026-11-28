@@ -61,7 +61,7 @@ def llm_stream(request: Completion):
         def chunks():
             try:
                 while True:
-                    chunk=upstream.read(4096)
+                    chunk=upstream.readline()
                     if not chunk:
                         break
                     yield chunk

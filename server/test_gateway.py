@@ -28,7 +28,7 @@ class GatewayTest(unittest.TestCase):
     @patch("server.app.build_opener")
     def test_stream_forward(self,opener):
         response=MagicMock()
-        response.read.side_effect=[b'data: {"choices":[{"delta":{"content":"hello"}}]}\\n\\n',b'data: [DONE]\\n\\n',b'']
+        response.readline.side_effect=[b'data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\\n',b'\\n',b'data: [DONE]\\n',b'\\n',b'']
         opener.return_value.open.return_value=response
         with TestClient(app) as client:
             result=client.post("/v1/llm/stream",json={"messages":[{"role":"user","content":"hi"}]})
