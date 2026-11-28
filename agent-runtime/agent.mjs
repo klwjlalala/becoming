@@ -40,7 +40,7 @@ export class Gateway{
   async generateImage({prompt,size='1024x1024',signal}={}){
     if(typeof prompt!=='string'||!prompt.trim()||prompt.length>4000||!['1024x1024','1024x1536','1536x1024'].includes(size))throw Error('Invalid image generation request');
     const res=await fetch(this.url+'/v1/llm/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:prompt.trim(),size}),redirect:'error',signal:combinedSignal(signal)});
-    if(!res.ok)throw Error('Gateway image generation HTTP '+res.status);
+    if(!res.ok){if(res.status===503)throw Error('Image generation is not configured in the Python gateway');throw Error('Gateway image generation HTTP '+res.status);}
     const result=await res.json();
     if(typeof result.image_base64!=='string'||result.image_base64.length>20000000||!['image/png','image/jpeg','image/webp'].includes(result.mime_type))throw Error('Invalid generated image response');
     const buffer=Buffer.from(result.image_base64,'base64');
