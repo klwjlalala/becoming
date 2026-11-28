@@ -8,6 +8,7 @@ import {LongMemory} from './memory.mjs';
 import {HistoricalMemory} from './memory-search.mjs';
 import {PersonalUnderstanding} from './understanding.mjs';
 import {GrowthStore,GrowthTools} from './growth.mjs';
+import {CapabilityRegistry} from './capabilities/registry.mjs';
 const port=Number(process.env.BECOMING_LOCAL_PORT||4310);
 const host='127.0.0.1:'+port;
 const path=resolve(process.env.BECOMING_LOCAL_DB||'data/agent-local.sqlite3');
@@ -22,7 +23,9 @@ const growthPath=resolve(process.env.BECOMING_LOCAL_GROWTH_DB||path+'.growth.sql
 if(growthPath===path)throw Error('Growth and transcript databases must be separate');
 mkdirSync(dirname(growthPath),{recursive:true});
 const growth=new GrowthTools(gateway,new GrowthStore(growthPath));
-const agent=new Agent(store,gateway,{memory,understanding,growth});
+const capabilities=new CapabilityRegistry();
+growth.registerCapabilities(capabilities);
+const agent=new Agent(store,gateway,{memory,understanding,growth,capabilities});
 const worker=new BackgroundWorker(store,{'long_memory.extract':id=>{if(!memory)throw Error('Memory disabled');return memory.extract(id);},'personal_understanding.process':id=>{if(!understanding)throw Error('Understanding disabled');return understanding.processTurn(id);}});
 setInterval(()=>{worker.tick().catch(()=>console.error('Background worker tick failed'));},1000).unref();
 const assets=new Map([['/',['text/html; charset=utf-8','index.html']],['/app.js',['text/javascript; charset=utf-8','app.js']],['/style.css',['text/css; charset=utf-8','style.css']]]);
