@@ -6,7 +6,7 @@ test('system prompt preserves explicit task gates and ongoing artifact revision 
   assert.match(SYSTEM_PROMPT,/【阶段性成果与持续修订】/);
   assert.match(SYSTEM_PROMPT,/不提前把最终成果包装成已完成/);
   assert.match(SYSTEM_PROMPT,/主动修订受影响部分/);
-  assert.match(SYSTEM_PROMPT,/没有了.*未完成的成果/s);
+  assert.match(SYSTEM_PROMPT,/没有了.*立即完成已承诺的交付/s);
   assert.match(SYSTEM_PROMPT,/不要每收到一条新消息就自动重写全文/);
   assert.match(SYSTEM_PROMPT,/优先瞄准区间中部/);
   assert.match(SYSTEM_PROMPT,/中文写作要求.*非空白字符/);
