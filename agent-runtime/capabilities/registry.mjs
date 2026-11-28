@@ -115,19 +115,29 @@ export class CapabilityRegistry{
 }
 
 export async function runCapabilityLoop(model,messages,registry,{signal,onToken,conversationId='default',maxRounds=6,maxCalls=8}={}){
-  if(!model||typeof model.completeStructured!=='function')throw Error('Model does not support structured tool calling');
+  if(!model||typeof model.completeStructured!=='function'&&typeof model.streamStructured!=='function')throw Error('Model does not support structured tool calling');
   const context=messages.map(message=>({...message}));
   const active=new Set(registry.initialNames());
   const events=[],blocks=[];
-  let totalCalls=0;
+  let totalCalls=0,accumulatedText='';
   for(let round=0;round<maxRounds;round++){
     const specs=registry.toolSpecs([...active]);
-    const response=await model.completeStructured(context,{tools:specs,tool_choice:'auto',signal});
+    let roundText='';
+    const roundToken=chunk=>{
+      if(!roundText&&accumulatedText)onToken?.('\\n\\n');
+      roundText+=chunk;onToken?.(chunk);
+    };
+    const response=typeof model.streamStructured==='function'
+      ?await model.streamStructured(context,{tools:specs,tool_choice:'auto',signal,onToken:roundToken})
+      :await model.completeStructured(context,{tools:specs,tool_choice:'auto',signal});
+    if(response.text){
+      if(!response.streamed){if(accumulatedText)onToken?.('\\n\\n');onToken?.(response.text);}
+      accumulatedText+=response.text;
+    }
     const calls=response.tool_calls??[];
     if(!calls.length){
-      const answer=response.text?.trim();
+      const answer=accumulatedText.trim();
       if(!answer)throw Error('Model returned neither text nor tool calls');
-      onToken?.(answer);
       return {answer,events,blocks,tool_calls:totalCalls,rounds:round+1};
     }
     context.push({role:'assistant',content:response.text||null,tool_calls:calls});
