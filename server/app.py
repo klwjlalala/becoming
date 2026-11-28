@@ -101,7 +101,7 @@ def llm(request: Completion):
 @app.post("/v1/llm/stream")
 def llm_stream(request: Completion):
     """Forward provider SSE chunks without interpreting or storing conversation data."""
-    if sum(len(m.content) for m in request.messages)>500000:
+    if sum(len(m.content or '') for m in request.messages)>500000:
         raise HTTPException(413,"Context too large")
     try:
         base=os.environ.get("BECOMING_BASE_URL",os.environ.get("BECOMING_MODEL_BASE_URL","https://api.openai.com/v1"))
