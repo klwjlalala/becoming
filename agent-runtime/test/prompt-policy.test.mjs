@@ -17,4 +17,7 @@ test('system prompt preserves explicit task gates and ongoing artifact revision 
   assert.match(SYSTEM_PROMPT,/没有了.*应视为该补充环节已完成/);
   assert.match(SYSTEM_PROMPT,/不要为了形式上的确认而重复提问/);
   assert.match(SYSTEM_PROMPT,/“没有了”不等于批准执行/);
+  assert.match(SYSTEM_PROMPT,/只有全部约定的实质性问题与必要追问完成后，才发起最终补充确认/);
+  assert.match(SYSTEM_PROMPT,/最终确认只问一次/);
+  assert.match(SYSTEM_PROMPT,/不得与新的实质性问题合并/);
 });
