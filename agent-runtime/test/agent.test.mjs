@@ -40,7 +40,8 @@ test('structured prompts persist as conversation instructions beyond the history
  assert.equal(calls.length,callCount,'Clearing instructions should not consume a model call');
  const after=await agent.reply('继续普通聊天');
  assert.equal(after.event.session_instruction,null);
- assert.ok(!calls.at(-1)[0].content.includes(replacement));
+ assert.ok(!calls.at(-1).some(message=>message.content.includes(replacement)),'Cleared instructions must not remain in recent history');
+ assert.ok(!calls.at(-1).some(message=>message.content.includes(prompt)),'Retired prompt source turns must stay excluded');
  store.close();
 });
 test('long reference text is not promoted to session instructions without a role header',async()=>{
