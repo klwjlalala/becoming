@@ -4,7 +4,7 @@ import {runCapabilityLoop} from './capabilities/registry.mjs';
 
 function aborted(){const error=new Error('Request cancelled');error.name='AbortError';return error;}
 function combinedSignal(signal){
-  const timeout=AbortSignal.timeout(90000);
+  const timeout=AbortSignal.timeout(180000);
   return signal?AbortSignal.any([signal,timeout]):timeout;
 }
 export class Gateway{
