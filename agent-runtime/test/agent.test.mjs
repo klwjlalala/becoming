@@ -13,10 +13,10 @@ test('structured prompts persist as conversation instructions beyond the history
  const store=new Store(':memory:'),calls=[];
  const model={complete:async messages=>{calls.push(messages);return '收到';}};
  const agent=new Agent(store,model,{historyTurns:2});
- const prompt='Role：研究顾问\\n严格遵守以下要求。\\n提问流程\\n最终交付一份完整报告。\\n'+('根据用户回答逐步调整任务，不要提前总结。'.repeat(30));
+ const prompt='Role：研究顾问\\n严格遵守以下要求。\\n提问流程\\n最终交付一份完整报告。\\n'+('根据用户回答逐步调整任务，不要提前总结。'.repeat(50));
  const first=await agent.reply(prompt);
  assert.ok(first.event.session_instruction);
- assert.equal(first.event.session_instruction.status,'updated');
+ assert.equal(first.event.session_instruction.status,'pinned');
  assert.equal(store.getInstructions().content,prompt);
  assert.equal(store.getInstructions().source_turn_id,first.id);
  assert.ok(calls[0][0].content.includes(prompt));
