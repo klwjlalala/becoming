@@ -37,6 +37,59 @@ export class Gateway{
     }
     return {text:text.trim(),tool_calls:toolCalls,finish_reason:result.finish_reason??null,usage:result.usage??null};
   }
+  async streamStructured(messages,{tools=[],tool_choice='auto',signal,onToken}={}){
+    if(!Array.isArray(messages)||!messages.length||!Array.isArray(tools)||tools.length>32)throw Error('Invalid structured stream request');
+    const res=await fetch(this.url+'/v1/llm/stream',{method:'POST',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify({messages,tools,tool_choice}),redirect:'error',signal:combinedSignal(signal)});
+    if(!res.ok)throw Error('Gateway structured stream HTTP '+res.status);
+    if(!(res.headers.get('content-type')||'').toLowerCase().includes('text/event-stream'))throw Error('Gateway did not return an SSE stream');
+    if(!res.body)throw Error('Gateway stream body unavailable');
+    const reader=res.body.getReader(),decoder=new TextDecoder(),toolCalls=new Map();
+    let buffer='',text='',finished=false,completed=false,finishReason=null,usage=null;
+    const parseFrame=frame=>{
+      let event='message';const data=[];
+      for(const line of frame.split(/\\r?\\n/)){
+        if(line.startsWith('event:'))event=line.slice(6).trim();
+        else if(line.startsWith('data:'))data.push(line.slice(5).replace(/^ /,''));
+      }
+      if(!data.length)return;
+      const raw=data.join('\\n');
+      if(raw.trim()==='[DONE]'){finished=true;return;}
+      let payload;try{payload=JSON.parse(raw);}catch{throw Error('Invalid upstream SSE payload');}
+      if(event==='error'||payload?.error)throw Error('Upstream model stream error');
+      const choice=payload?.choices?.[0];
+      if(!choice){if(payload?.usage){usage=payload.usage;return;}throw Error('Invalid upstream stream chunk');}
+      const delta=choice.delta||{},content=delta.content;
+      if(typeof content==='string'&&content){text+=content;onToken?.(content);}
+      else if(Array.isArray(content))for(const part of content)if(part?.type==='text'&&typeof part.text==='string'&&part.text){text+=part.text;onToken?.(part.text);}
+      for(const partial of delta.tool_calls||[]){
+        const index=Number.isInteger(partial.index)?partial.index:toolCalls.size;
+        const current=toolCalls.get(index)||{id:'',type:'function',function:{name:'',arguments:''}};
+        if(typeof partial.id==='string'&&partial.id)current.id=partial.id;
+        if(typeof partial.type==='string')current.type=partial.type;
+        if(typeof partial.function?.name==='string')current.function.name+=partial.function.name;
+        if(typeof partial.function?.arguments==='string')current.function.arguments+=partial.function.arguments;
+        toolCalls.set(index,current);
+      }
+      if(choice.finish_reason!==null&&choice.finish_reason!==undefined){completed=true;finishReason=choice.finish_reason;}
+      if(payload.usage)usage=payload.usage;
+    };
+    try{
+      while(!finished){
+        const {value,done}=await reader.read();if(done)break;
+        buffer+=decoder.decode(value,{stream:true});let match;
+        while((match=/\\r?\\n\\r?\\n/.exec(buffer))&&!finished){const frame=buffer.slice(0,match.index);buffer=buffer.slice(match.index+match[0].length);parseFrame(frame);}
+      }
+      buffer+=decoder.decode();if(buffer.trim()&&!finished)parseFrame(buffer);
+      if(!finished&&!completed)throw Error('Upstream stream ended before completion');
+      const calls=[...toolCalls.entries()].sort((a,b)=>a[0]-b[0]).map(([,call])=>call);
+      if(text.length>64000||calls.length>16||(!text.trim()&&!calls.length))throw Error('Invalid structured model response');
+      for(const call of calls)if(!call.id||call.type!=='function'||!call.function.name||call.function.arguments.length>12000)throw Error('Invalid structured tool call');
+      return {text,tool_calls:calls,finish_reason:finishReason,usage,streamed:true};
+    }finally{
+      try{await reader.cancel();}catch{}
+      try{reader.releaseLock();}catch{}
+    }
+  }
   async generateImage({prompt,size='1024x1024',signal}={}){
     if(typeof prompt!=='string'||!prompt.trim()||prompt.length>4000||!['1024x1024','1024x1536','1536x1024'].includes(size))throw Error('Invalid image generation request');
     const res=await fetch(this.url+'/v1/llm/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:prompt.trim(),size}),redirect:'error',signal:combinedSignal(signal)});
