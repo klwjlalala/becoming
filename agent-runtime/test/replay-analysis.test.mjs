@@ -61,6 +61,8 @@ test('a no-more-additions reply completes the final check without repeating know
   assert.equal(result.checks.handbook_generated_after_closure_signal.passed,true);
   assert.equal(result.checks.handbook_not_prematurely_delivered.passed,true);
   assert.equal(result.checks.standalone_final_confirmation_was_requested.passed,true);
+  assert.equal(result.checks.final_confirmation_not_asked_before_last_substantive_turn.passed,true);
+  assert.equal(result.checks.final_confirmation_was_requested_once_after_last_substantive_turn.passed,true);
   assert.equal(result.final_turn_is_closure,true);
 });
 
@@ -76,4 +78,35 @@ test('replay analysis rejects combining a known-age reconfirmation with the fina
   assert.equal(result.reasks_known_age,true);
   assert.equal(result.checks.known_age_was_not_reconfirmed.passed,false);
   assert.equal(result.checks.standalone_final_confirmation_was_requested.passed,false);
+});
+
+
+test('replay analysis rejects a premature final check that is repeated after the last substantive answer',()=>{
+  const turns=[
+    {index:0,kind:'initial_instruction',assistant:'开始探索'},
+    {index:1,kind:'replayed_user_turn',user:'我今年28岁。',assistant:'明白，我会按28岁来理解。'},
+    {index:2,kind:'replayed_user_turn',user:'我希望自由支配人生，也想帮助别人。',assistant:'你身边有没有能聊这些的人？另外还有什么想补充或修正的吗？'},
+    {index:3,kind:'replayed_user_turn',user:'暂时没有，但我确实渴望这样的关系。',assistant:'写手册前最后确认一下：还有什么想补充或修正的吗？'},
+    {index:4,kind:'replayed_user_turn',user:'没有了',assistant:handbook}
+  ];
+  const result=analyzeReplay(turns);
+  assert.deepEqual(result.final_confirmation_turn_indices,[2,3]);
+  assert.deepEqual(result.premature_final_confirmation_turn_indices,[2]);
+  assert.equal(result.checks.final_confirmation_not_asked_before_last_substantive_turn.passed,false);
+  assert.equal(result.checks.final_confirmation_was_requested_once_after_last_substantive_turn.passed,false);
+  assert.equal(result.checks.standalone_final_confirmation_was_requested.passed,true);
+});
+
+test('replay analysis rejects combining the final additions check with a substantive question',()=>{
+  const turns=[
+    {index:0,kind:'initial_instruction',assistant:'开始探索'},
+    {index:1,kind:'replayed_user_turn',user:'我今年28岁。',assistant:'明白。'},
+    {index:2,kind:'replayed_user_turn',user:'我希望拥有能深入交流的关系。',assistant:'你身边有没有适合聊这些的人？另外，你还有什么想补充或修正的吗？'},
+    {index:3,kind:'replayed_user_turn',user:'没有了',assistant:handbook}
+  ];
+  const result=analyzeReplay(turns);
+  assert.deepEqual(result.final_confirmation_turn_indices,[2]);
+  assert.equal(result.checks.final_confirmation_not_asked_before_last_substantive_turn.passed,true);
+  assert.equal(result.checks.standalone_final_confirmation_was_requested.passed,false);
+  assert.equal(result.checks.final_confirmation_was_requested_once_after_last_substantive_turn.passed,true);
 });
