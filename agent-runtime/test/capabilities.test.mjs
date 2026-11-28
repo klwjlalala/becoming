@@ -59,8 +59,8 @@ test('capability loop preserves streamed preambles and final answers across tool
     onToken('已经完成。');return {text:'已经完成。',streamed:true,tool_calls:[]};
   }};
   const result=await runCapabilityLoop(model,[{role:'user',content:'执行一下'}],registry,{onToken:token=>tokens.push(token)});
-  assert.equal(result.answer,'我来执行工具。\\n\\n已经完成。');
-  assert.equal(tokens.join(''),'我来执行工具。\\n\\n已经完成。');
+  assert.equal(result.answer,'我来执行工具。\n\n已经完成。');
+  assert.equal(tokens.join(''),'我来执行工具。\n\n已经完成。');
 });
 test('capability schema rejects missing, extra and invalid values before execution',async()=>{
   const registry=chartRegistry();let calls=0;
