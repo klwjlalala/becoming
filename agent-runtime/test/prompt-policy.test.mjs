@@ -13,4 +13,5 @@ test('system prompt preserves explicit task gates and ongoing artifact revision 
   assert.match(SYSTEM_PROMPT,/不得用重复、空话或虚构内容凑字/);
   assert.match(SYSTEM_PROMPT,/确认视为硬门槛/);
   assert.match(SYSTEM_PROMPT,/单独询问最终确认/);
+  assert.match(SYSTEM_PROMPT,/不要与其他实质问题合并/);
 });
