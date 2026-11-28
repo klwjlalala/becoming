@@ -50,7 +50,7 @@ test('a no-more-additions reply completes the final check without repeating know
   const turns=[
     {index:0,kind:'initial_instruction',assistant:'开始探索'},
     {index:1,kind:'replayed_user_turn',user:'我今年28岁。',assistant:'明白，我会按28岁来理解。'},
-    {index:2,kind:'replayed_user_turn',user:'我的生活目标',assistant:'还有什么想补充或修正的吗？'},
+    {index:2,kind:'replayed_user_turn',user:'我的生活目标',assistant:'我会按你说的28岁来写。还有什么想补充或修正的吗？'},
     {index:3,kind:'replayed_user_turn',user:'没有了',assistant:handbook}
   ];
   const result=analyzeReplay(turns);
