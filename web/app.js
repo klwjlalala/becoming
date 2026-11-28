@@ -280,8 +280,9 @@ function showDemo(){
 async function updateStatus(){
   try{
     const status=await api('/api/status');$('connection-indicator').classList.add('connected');
-    $('connection-label').textContent='本地智能体已连接';
-    const jobs=status.jobs||{};$('connection-label').title='后台整理任务：'+(jobs.pending||0)+' 项等待中';
+    const instruction=status.sessionInstruction?.active;
+    $('connection-label').textContent=instruction?'本地智能体已连接 · 指令已固定':'本地智能体已连接';
+    const jobs=status.jobs||{};$('connection-label').title='后台整理任务：'+(jobs.pending||0)+' 项等待中'+(instruction?'；本次会话已固定自定义指令（'+status.sessionInstruction.characters+' 字）':'');
   }catch{
     $('connection-indicator').classList.remove('connected');$('connection-label').textContent='本地服务暂不可用';
   }
