@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {CapabilityRegistry,runCapabilityLoop} from '../capabilities/registry.mjs';
 import {Agent} from '../agent.mjs';
 import {Store} from '../store.mjs';
+import {GrowthStore,GrowthTools} from '../growth.mjs';
 
 function chartRegistry(){
   const registry=new CapabilityRegistry();
@@ -97,6 +98,27 @@ test('Agent integrates native capability calls and returns generated content blo
   assert.equal(turn.event.capabilities[0].name,'make_visual');
   assert.equal(turn.event.capabilities[0].status,'completed');
   store.close();
+});
+test('native growth tools preserve the existing user-confirmation boundary',async()=>{
+  const store=new Store(':memory:'),growthStore=new GrowthStore(':memory:');
+  const growth=new GrowthTools({complete:async()=>''},growthStore);
+  const registry=new CapabilityRegistry();growth.registerCapabilities(registry);
+  let call=0;
+  const model={completeStructured:async()=>{
+    call++;
+    if(call===1)return {text:'',tool_calls:[{id:'discover-growth',type:'function',function:{name:'discover_capabilities',arguments:'{"query":"成长目标"}'}}]};
+    if(call===2)return {text:'',tool_calls:[{id:'create-growth',type:'function',function:{name:'create_goal',arguments:'{"text":"阅读"}'}}]};
+    return {text:'我已经准备好新增“阅读”目标，但还没有保存。请确认后再写入。',tool_calls:[]};
+  }};
+  const agent=new Agent(store,model,{growth,capabilities:registry});
+  const turn=await agent.reply('帮我创建一个成长目标：阅读。');
+  assert.equal(turn.pending_growth.preview.tool,'create_goal');
+  assert.equal(growthStore.read('list_goals',{}).items.length,0,'A proposed mutation must not be persisted before confirmation');
+  assert.deepEqual(turn.event.capabilities.map(event=>event.name),['discover_capabilities','create_goal']);
+  const committed=await agent.reply('/confirm '+turn.pending_growth.token);
+  assert.equal(committed.event.growth.status,'committed');
+  assert.equal(growthStore.read('list_goals',{}).items.length,1);
+  growthStore.close();store.close();
 });
 test('registry exposes only enabled capabilities to discovery',()=>{
   const registry=chartRegistry();
