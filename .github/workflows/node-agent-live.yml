@@ -2,7 +2,7 @@ name: Node agent real-model acceptance
 on:
   push:
     branches: [feat/local-agent-web, feat/ai-friend-web-v1]
-    paths: ['.github/workflows/node-agent-live.yml']
+    paths: ['.github/workflows/node-agent-live.yml', 'evaluation/personal_understanding_cases.json']
   workflow_dispatch:
     inputs:
       suite:
