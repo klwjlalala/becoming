@@ -1,1 +1,107 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Becoming · Agent Lab</title><link rel="stylesheet" href="/style.css"></head><body><main><header><h1>Becoming <small>Agent Lab</small></h1><label for="conversation">会话</label> <select id="conversation"></select> <button id="new-conversation" type="button">新会话</button><p id="status">读取本地状态…</p></header><section id="history" aria-live="polite"></section><form id="chat"><label for="message">与你的 AI 伙伴交流</label><textarea id="message" required maxlength="16000" rows="4" placeholder="输入你想聊的内容…"></textarea><button id="send">发送</button><section id="confirmation" hidden><button type="button" id="confirm">确认变更</button> <button type="button" id="cancel">取消变更</button></section><p id="error" role="alert"></p></form></main><script type="module" src="/app.js"></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f5f2">
+  <meta name="description" content="一个越来越懂你的 AI 朋友，陪你聊生活、认识自己。">
+  <title>成为更好的自己 · AI 好友</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主导航">
+      <a class="brand" href="/" aria-label="成为更好的自己首页">
+        <span class="brand-mark" aria-hidden="true">✦</span>
+        <span class="brand-copy"><strong>成为更好的自己</strong><small>GROW AT YOUR OWN PACE</small></span>
+      </a>
+      <nav class="primary-nav">
+        <button class="nav-item active" type="button" data-nav="friend" aria-current="page">
+          <span class="nav-icon" aria-hidden="true">◉</span><span class="nav-label">AI 好友</span><span class="nav-indicator"></span>
+        </button>
+        <button class="nav-item" type="button" data-nav="actions" aria-disabled="true" title="后续阶段开放">
+          <span class="nav-icon" aria-hidden="true">☷</span><span class="nav-label">我的行动</span><span class="nav-soon">后续</span>
+        </button>
+        <button class="nav-item" type="button" data-nav="about" aria-disabled="true" title="后续阶段开放">
+          <span class="nav-icon" aria-hidden="true">◎</span><span class="nav-label">关于我</span><span class="nav-soon">后续</span>
+        </button>
+      </nav>
+      <div class="sidebar-bottom">
+        <button class="utility-button" id="theme-toggle" type="button"><span class="nav-icon" aria-hidden="true">◐</span><span class="nav-label">切换外观</span></button>
+        <button class="utility-button" id="settings-button" type="button"><span class="nav-icon" aria-hidden="true">⚙</span><span class="nav-label">设置</span></button>
+        <div class="sidebar-caption"><span class="status-dot"></span><span>你的长期会话</span></div>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <header class="topbar">
+        <div class="page-heading">
+          <div class="eyebrow">YOUR PERSONAL COMPANION</div>
+          <div class="heading-line">
+            <h1>AI 好友</h1><span class="online-indicator" id="connection-indicator"></span>
+            <span class="connection-label" id="connection-label">正在连接本地智能体</span>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <button class="icon-button search-button" id="search-open" type="button" aria-label="搜索聊天记录" title="搜索聊天记录"><span aria-hidden="true">⌕</span><span class="search-label">搜索聊天</span></button>
+          <button class="icon-button" id="more-button" type="button" aria-label="更多信息" title="产品信息">···</button>
+        </div>
+      </header>
+
+      <section class="chat-stage" aria-label="长期聊天">
+        <div class="history-toolbar">
+          <button class="load-older" id="load-older" type="button" hidden>↑ 查看更早的消息</button>
+          <div class="demo-notice" id="demo-notice" hidden><span>示例体验</span> 以下内容为虚构数据，不会写入你的真实记录<button id="demo-exit" type="button">退出示例</button></div>
+        </div>
+        <div class="history" id="history" aria-live="polite" aria-relevant="additions text">
+          <section class="welcome" id="welcome">
+            <div class="welcome-orb" aria-hidden="true"><span>✦</span></div>
+            <div class="welcome-kicker">A LITTLE SPACE FOR YOU</div>
+            <h2>你好，很高兴认识你。</h2>
+            <p class="welcome-description">这里没有必须完成的目标，也不需要刻意表现。<br>你可以聊聊今天，也可以说说那些一直放在心里的事。</p>
+            <div class="starter-prompts" aria-label="可选的聊天开场">
+              <button type="button" data-prompt="最近发生了一件小事，我想和你聊聊。"><span>✧</span> 最近发生了一件小事</button>
+              <button type="button" data-prompt="我最近有点迷茫，想梳理一下自己的想法。"><span>⌁</span> 我有些事情想不明白</button>
+              <button type="button" data-prompt="我想更了解自己，但不知道从哪里开始。"><span>♡</span> 我想更了解自己</button>
+            </div>
+            <button class="demo-link" id="demo-open" type="button">先看看一段示例对话 <span>→</span></button>
+          </section>
+        </div>
+        <form class="composer" id="chat-form">
+          <div class="composer-shell">
+            <textarea id="message" rows="1" maxlength="16000" placeholder="和我聊聊你的想法、感受，或今天遇到的事…" aria-label="输入消息"></textarea>
+            <div class="composer-footer">
+              <div class="composer-hint"><span class="hint-dot"></span> 不必组织好语言，想到什么都可以说</div>
+              <div class="composer-controls">
+                <span class="char-count" id="char-count">0 / 16000</span>
+                <button class="stop-button" id="stop-button" type="button" hidden>停止回复</button>
+                <button class="send-button" id="send-button" type="submit" disabled aria-label="发送消息"><span>发送</span><span aria-hidden="true">↑</span></button>
+              </div>
+            </div>
+          </div>
+          <div class="privacy-hint">对话保存在本地；生成回复时，相关内容会发送至你配置的模型服务。</div>
+        </form>
+      </section>
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </main>
+  </div>
+
+  <dialog class="search-dialog" id="search-dialog">
+    <form class="search-panel" id="search-form">
+      <div class="dialog-heading">
+        <div><span class="dialog-kicker">YOUR CONVERSATION</span><h2>搜索聊天记录</h2></div>
+        <button class="dialog-close" id="search-close" type="button" aria-label="关闭">×</button>
+      </div>
+      <label class="search-input-wrap"><span aria-hidden="true">⌕</span><input id="search-query" type="search" maxlength="120" placeholder="搜索关键词…" autocomplete="off"></label>
+      <div class="date-filters">
+        <label>开始日期<input id="search-from" type="date"></label>
+        <label>结束日期<input id="search-to" type="date"></label>
+        <button class="search-submit" type="submit">搜索</button>
+      </div>
+      <div class="search-summary" id="search-summary">支持关键词和日期范围搜索</div>
+      <div class="search-results" id="search-results"></div>
+    </form>
+  </dialog>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
