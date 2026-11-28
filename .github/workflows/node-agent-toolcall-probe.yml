@@ -35,6 +35,8 @@ jobs:
           python-version: '3.12'
       - name: Install gateway dependencies
         run: python -m pip install -e .
+      - name: Check Python gateway syntax
+        run: python -m py_compile server/app.py
       - name: Run deterministic Node tests
         run: npm --prefix agent-runtime test
       - name: Verify model secrets
