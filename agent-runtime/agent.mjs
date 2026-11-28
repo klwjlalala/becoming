@@ -40,7 +40,7 @@ export class Gateway{
   async streamStructured(messages,{tools=[],tool_choice='auto',signal,onToken}={}){
     if(!Array.isArray(messages)||!messages.length||!Array.isArray(tools)||tools.length>32)throw Error('Invalid structured stream request');
     const res=await fetch(this.url+'/v1/llm/stream',{method:'POST',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify({messages,tools,tool_choice}),redirect:'error',signal:combinedSignal(signal)});
-    if(!res.ok)throw Error('Gateway structured stream HTTP '+res.status);
+    if(!res.ok){let detail='';try{detail=(await res.text()).slice(0,400);}catch{}throw Error('Gateway structured stream HTTP '+res.status+(detail?': '+detail:''));}
     if(!(res.headers.get('content-type')||'').toLowerCase().includes('text/event-stream'))throw Error('Gateway did not return an SSE stream');
     if(!res.body)throw Error('Gateway stream body unavailable');
     const reader=res.body.getReader(),decoder=new TextDecoder(),toolCalls=new Map();
