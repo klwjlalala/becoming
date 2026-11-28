@@ -56,6 +56,18 @@ test('long reference text is not promoted to session instructions without a role
  assert.equal(turn.event.session_instruction,null);
  store.close();
 });
+test('deleting a conversation removes active and retired prompt instructions',()=>{
+ const store=new Store(':memory:');
+ store.append('first prompt','first answer',[],'default',null,{content:'first instruction'});
+ store.append('/set-instructions second','second answer',[],'default',null,{content:'second instruction'});
+ assert.equal(store.getInstructions().content,'second instruction');
+ assert.equal(store.instructionSourceIds().length,2);
+ store.deleteConversation('default');
+ assert.equal(store.getInstructions(),null);
+ assert.deepEqual(store.instructionSourceIds(),[]);
+ assert.equal(store.history().length,0);
+ store.close();
+});
 test('real agent / background extract / recall / revision / forget',async()=>{
  const store=new Store(':memory:');let replacement=null;let context='';
  const model={complete:async messages=>{
