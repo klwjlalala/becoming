@@ -7,7 +7,7 @@ on:
     inputs:
       suite:
         type: choice
-        options: [web-smoke, functional, longitudinal, scenarios, acceptance]
+        options: [web-smoke, functional, longitudinal, scenarios, long-session, acceptance]
         default: web-smoke
 permissions:
   contents: read
@@ -18,7 +18,7 @@ jobs:
   live:
     if: >-
       (github.ref == 'refs/heads/feat/local-agent-web' || github.ref == 'refs/heads/feat/ai-friend-web-v1') &&
-      (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.event.head_commit.message == 'fix: enforce explicit tool invocation and guide understanding retries' || github.event.head_commit.message == 'test: run AI friend real-model web smoke')))
+      (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.event.head_commit.message == 'fix: enforce explicit tool invocation and guide understanding retries' || github.event.head_commit.message == 'test: run AI friend real-model web smoke' || github.event.head_commit.message == 'test: evaluate AI friend long session')))
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -38,7 +38,7 @@ jobs:
           BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
           BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
           BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
-          SUITE: ${{ inputs.suite || 'web-smoke' }}
+          SUITE: ${{ inputs.suite || (github.event_name == 'push' && github.event.head_commit.message == 'test: evaluate AI friend long session' && 'long-session') || 'web-smoke' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -55,6 +55,8 @@ jobs:
           curl -fsS http://127.0.0.1:8000/health >/dev/null
           if [[ "$SUITE" == web-smoke ]]; then
             npm --prefix agent-runtime run test:web-smoke
+          elif [[ "$SUITE" == long-session ]]; then
+            BECOMING_EFFECT_MODE=long-session BECOMING_REPORT=artifacts/node-effects-long-session.json npm --prefix agent-runtime run evaluate:live
           elif [[ "$SUITE" == acceptance ]]; then
             npm --prefix agent-runtime run test:live
             BECOMING_REPORT=artifacts/node-effects-scenarios.json BECOMING_EFFECT_MODE=scenarios npm --prefix agent-runtime run evaluate:live
