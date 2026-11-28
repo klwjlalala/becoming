@@ -124,14 +124,14 @@ export async function runCapabilityLoop(model,messages,registry,{signal,onToken,
     const specs=registry.toolSpecs([...active]);
     let roundText='';
     const roundToken=chunk=>{
-      if(!roundText&&accumulatedText)onToken?.('\\n\\n');
+      if(!roundText&&accumulatedText)onToken?.('\n\n');
       roundText+=chunk;onToken?.(chunk);
     };
     const response=typeof model.streamStructured==='function'
       ?await model.streamStructured(context,{tools:specs,tool_choice:'auto',signal,onToken:roundToken})
       :await model.completeStructured(context,{tools:specs,tool_choice:'auto',signal});
     if(response.text){
-      if(!response.streamed){if(accumulatedText)onToken?.('\\n\\n');onToken?.(response.text);}
+      if(!response.streamed){if(accumulatedText)onToken?.('\n\n');onToken?.(response.text);}
       accumulatedText+=response.text;
     }
     const calls=response.tool_calls??[];
