@@ -1,12 +1,13 @@
 import {DatabaseSync} from 'node:sqlite';
 import {randomUUID} from 'node:crypto';
+function withBlocks(row){if(!row)return row;let content_blocks=[];try{const parsed=JSON.parse(row.assistant_blocks||'[]');if(Array.isArray(parsed))content_blocks=parsed;}catch{}const {assistant_blocks,...rest}=row;return {...rest,content_blocks};}
 export class Store {
   constructor(path){
     this.db=new DatabaseSync(path);
     this.db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,created_at TEXT NOT NULL);
       INSERT OR IGNORE INTO conversations VALUES('default','长期会话',CURRENT_TIMESTAMP);
-      CREATE TABLE IF NOT EXISTS turns(id TEXT PRIMARY KEY,user TEXT NOT NULL,assistant TEXT NOT NULL,created_at TEXT NOT NULL,conversation_id TEXT NOT NULL DEFAULT 'default' REFERENCES conversations(id) ON DELETE CASCADE);
+      CREATE TABLE IF NOT EXISTS turns(id TEXT PRIMARY KEY,user TEXT NOT NULL,assistant TEXT NOT NULL,assistant_blocks TEXT NOT NULL DEFAULT '[]',created_at TEXT NOT NULL,conversation_id TEXT NOT NULL DEFAULT 'default' REFERENCES conversations(id) ON DELETE CASCADE);
       CREATE TABLE IF NOT EXISTS conversation_instructions(conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,content TEXT NOT NULL CHECK(length(trim(content))>0 AND length(content)<=16000),source_turn_id TEXT REFERENCES turns(id) ON DELETE SET NULL,version INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS conversation_instruction_sources(conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,source_turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,created_at TEXT NOT NULL,PRIMARY KEY(conversation_id,source_turn_id));
       CREATE TABLE IF NOT EXISTS turn_requests(request_id TEXT PRIMARY KEY,turn_id TEXT NOT NULL UNIQUE REFERENCES turns(id) ON DELETE CASCADE);
@@ -16,6 +17,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS blocked_memory_keys(key TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS long_memory_extraction_receipts(turn_id TEXT PRIMARY KEY REFERENCES turns(id) ON DELETE CASCADE);`);
     if(!this.db.prepare('PRAGMA table_info(turns)').all().some(c=>c.name==='conversation_id'))this.db.exec("ALTER TABLE turns ADD COLUMN conversation_id TEXT NOT NULL DEFAULT 'default'");
+    if(!this.db.prepare('PRAGMA table_info(turns)').all().some(c=>c.name==='assistant_blocks'))this.db.exec("ALTER TABLE turns ADD COLUMN assistant_blocks TEXT NOT NULL DEFAULT '[]'");
     if(!this.db.prepare('PRAGMA table_info(background_jobs)').all().some(c=>c.name==='priority'))this.db.exec('ALTER TABLE background_jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0');
     this.db.exec('CREATE INDEX IF NOT EXISTS turns_conversation ON turns(conversation_id)');
     this.db.exec("UPDATE background_jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'pending' END,error='Interrupted' WHERE status='running'");
@@ -33,12 +35,14 @@ export class Store {
   instructionSourceIds(conversationId='default'){this.requireConversation(conversationId);return this.db.prepare('SELECT source_turn_id FROM conversation_instruction_sources WHERE conversation_id=? ORDER BY created_at,source_turn_id').all(conversationId).map(row=>row.source_turn_id);}
   deleteConversation(id){this.requireConversation(id);return this.transaction(()=>{this.db.prepare('DELETE FROM conversation_instructions WHERE conversation_id=?').run(id);this.db.prepare('DELETE FROM conversation_instruction_sources WHERE conversation_id=?').run(id);this.db.prepare('DELETE FROM turns WHERE conversation_id=?').run(id);if(id!=='default')this.db.prepare('DELETE FROM conversations WHERE id=?').run(id);});}
   requestTurn(requestId){if(typeof requestId!=='string'||!requestId)return null;const row=this.db.prepare('SELECT turn_id FROM turn_requests WHERE request_id=?').get(requestId);return row?this.turn(row.turn_id):null;}
-  append(user,assistant,kinds=[],conversationId='default',requestId=null,instructionUpdate=null){
+  append(user,assistant,kinds=[],conversationId='default',requestId=null,instructionUpdate=null,blocks=[]){
     this.requireConversation(conversationId);
+    if(!Array.isArray(blocks)||blocks.length>16)throw Error('Invalid content blocks');
+    const blockJson=JSON.stringify(blocks);if(blockJson.length>128000)throw Error('Content blocks too large');
     return this.transaction(()=>{
       if(requestId){const existing=this.db.prepare('SELECT turn_id FROM turn_requests WHERE request_id=?').get(requestId);if(existing)return this.turn(existing.turn_id);}
       const t={id:randomUUID(),user,assistant,created_at:new Date().toISOString(),conversation_id:conversationId};
-      this.db.prepare('INSERT INTO turns(id,user,assistant,created_at,conversation_id) VALUES(?,?,?,?,?)').run(t.id,t.user,t.assistant,t.created_at,conversationId);
+      this.db.prepare('INSERT INTO turns(id,user,assistant,assistant_blocks,created_at,conversation_id) VALUES(?,?,?,?,?,?)').run(t.id,t.user,assistant,blockJson,t.created_at,conversationId);
       if(requestId)this.db.prepare('INSERT INTO turn_requests(request_id,turn_id) VALUES(?,?)').run(requestId,t.id);
       if(instructionUpdate){
         const content=instructionUpdate.content;
@@ -50,19 +54,19 @@ export class Store {
       }
       const insert=this.db.prepare('INSERT INTO background_jobs(turn_id,kind,priority) VALUES(?,?,?)');
       for(const spec of kinds)insert.run(t.id,typeof spec==='string'?spec:spec.kind,typeof spec==='string'?0:spec.priority);
-      return t;
+      return {...t,content_blocks:blocks};
     });
   }
-  history(limit=12,conversationId='default'){this.requireConversation(conversationId);return this.db.prepare('SELECT id,user,assistant,created_at,conversation_id FROM turns WHERE conversation_id=? ORDER BY rowid DESC LIMIT ?').all(conversationId,limit).reverse();}
+  history(limit=12,conversationId='default'){this.requireConversation(conversationId);return this.db.prepare('SELECT id,user,assistant,assistant_blocks,created_at,conversation_id FROM turns WHERE conversation_id=? ORDER BY rowid DESC LIMIT ?').all(conversationId,limit).reverse().map(withBlocks);}
   historyPage(limit=80,conversationId='default',before=null){
     this.requireConversation(conversationId);
     if(!Number.isInteger(limit)||limit<1||limit>200)throw Error('Invalid page size');
     if(before!==null&&(!Number.isSafeInteger(before)||before<1))throw Error('Invalid cursor');
     const rows=before===null
-      ?this.db.prepare('SELECT rowid AS cursor,id,user,assistant,created_at,conversation_id FROM turns WHERE conversation_id=? ORDER BY rowid DESC LIMIT ?').all(conversationId,limit+1)
+      ?this.db.prepare('SELECT rowid AS cursor,id,user,assistant,assistant_blocks,created_at,conversation_id FROM turns WHERE conversation_id=? ORDER BY rowid DESC LIMIT ?').all(conversationId,limit+1)
       :this.db.prepare('SELECT rowid AS cursor,id,user,assistant,created_at,conversation_id FROM turns WHERE conversation_id=? AND rowid<? ORDER BY rowid DESC LIMIT ?').all(conversationId,before,limit+1);
     const has_more=rows.length>limit,selected=rows.slice(0,limit).reverse();
-    return {turns:selected,has_more,before:selected.length?selected[0].cursor:null};
+    return {turns:selected.map(withBlocks),has_more,before:selected.length?selected[0].cursor:null};
   }
   historyAround(id,limit=80,conversationId='default'){
     this.requireConversation(conversationId);
@@ -75,7 +79,7 @@ export class Store {
     const oldest=left.at(-1)?.cursor??null,newest=right.at(-1)?.cursor??left[0]?.cursor??null;
     const has_more_before=oldest!==null&&!!this.db.prepare('SELECT 1 FROM turns WHERE conversation_id=? AND rowid<? LIMIT 1').get(conversationId,oldest);
     const has_more_after=newest!==null&&!!this.db.prepare('SELECT 1 FROM turns WHERE conversation_id=? AND rowid>? LIMIT 1').get(conversationId,newest);
-    return {turns:[...left.reverse(),...right],has_more_before,has_more_after,before:oldest};
+    return {turns:[...left.reverse(),...right].map(withBlocks),has_more_before,has_more_after,before:oldest};
   }
   search(query,{from=null,to=null,limit=50,conversationId='default'}={}){
     this.requireConversation(conversationId);
@@ -86,9 +90,9 @@ export class Store {
     if(from){clauses.push('substr(created_at,1,10)>=?');args.push(from);}
     if(to){clauses.push('substr(created_at,1,10)<=?');args.push(to);}
     args.push(limit);
-    return this.db.prepare('SELECT rowid AS cursor,id,user,assistant,created_at,conversation_id FROM turns WHERE '+clauses.join(' AND ')+' ORDER BY rowid DESC LIMIT ?').all(...args);
+    return this.db.prepare('SELECT rowid AS cursor,id,user,assistant,assistant_blocks,created_at,conversation_id FROM turns WHERE '+clauses.join(' AND ')+' ORDER BY rowid DESC LIMIT ?').all(...args).map(withBlocks);
   }
-  turn(id){return this.db.prepare('SELECT id,user,assistant,created_at,conversation_id FROM turns WHERE id=?').get(id);}
+  turn(id){return withBlocks(this.db.prepare('SELECT id,user,assistant,assistant_blocks,created_at,conversation_id FROM turns WHERE id=?').get(id));}
   jobs(turnId){return turnId?this.db.prepare('SELECT * FROM background_jobs WHERE turn_id=? ORDER BY id').all(turnId):this.db.prepare('SELECT * FROM background_jobs ORDER BY id DESC LIMIT 200').all();}
   claim(){
     return this.transaction(()=>{
