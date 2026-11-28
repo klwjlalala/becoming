@@ -5,6 +5,7 @@ from typing import Literal
 from urllib.request import Request, build_opener
 from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from becoming.models import NoRedirect
 
@@ -40,6 +41,37 @@ def llm(request: Completion):
         raise
     except Exception:
         raise HTTPException(502,"Upstream model request failed") from None
+
+
+@app.post("/v1/llm/stream")
+def llm_stream(request: Completion):
+    """Forward provider SSE chunks without interpreting or storing conversation data."""
+    if sum(len(m.content) for m in request.messages)>500000:
+        raise HTTPException(413,"Context too large")
+    try:
+        base=os.environ.get("BECOMING_BASE_URL",os.environ.get("BECOMING_MODEL_BASE_URL","https://api.openai.com/v1"))
+        key=os.environ.get("BECOMING_API_KEY") or os.environ.get("BECOMING_MODEL_API_KEY")
+        model=os.environ.get("BECOMING_MODEL")
+        parsed=urlparse(base)
+        if not key or not model or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or not (parsed.scheme=="https" or (parsed.scheme=="http" and parsed.hostname in ("localhost","127.0.0.1","::1"))):
+            raise HTTPException(503,"Model not configured")
+        payload={"model":model,"messages":[m.model_dump() for m in request.messages],"stream":True}
+        req=Request(base.rstrip("/")+"/chat/completions",data=json.dumps(payload).encode(),headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","Accept":"text/event-stream"},method="POST")
+        upstream=build_opener(NoRedirect()).open(req,timeout=90)
+        def chunks():
+            try:
+                while True:
+                    chunk=upstream.read(4096)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                upstream.close()
+        return StreamingResponse(chunks(),media_type="text/event-stream",headers={"Cache-Control":"no-cache, no-transform","X-Accel-Buffering":"no"})
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(502,"Upstream model stream failed") from None
 
 class EmbeddingRequest(BaseModel):
     texts: list[str] = Field(min_length=1,max_length=32)

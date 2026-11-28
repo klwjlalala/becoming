@@ -1,5 +1,11 @@
 import {SYSTEM_PROMPT} from './prompt.mjs';
 import {isUrgent} from './understanding.mjs';
+
+function aborted(){const error=new Error('Request cancelled');error.name='AbortError';return error;}
+function combinedSignal(signal){
+  const timeout=AbortSignal.timeout(90000);
+  return signal?AbortSignal.any([signal,timeout]):timeout;
+}
 export class Gateway{
   constructor(url){
     const u=new URL(url);if(u.username||u.password||u.search||u.hash||!(u.protocol==='https:'||(u.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(u.hostname))))throw Error('Gateway requires HTTPS or loopback HTTP');
@@ -13,26 +19,80 @@ export class Gateway{
       const {vectors}=await res.json();if(!Array.isArray(vectors)||vectors.length!==batch.length)throw Error('Invalid embedding count');all.push(...vectors);
     }return all;
   }
-  async complete(messages){
-    const res=await fetch(this.url+'/v1/llm/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages}),redirect:'error',signal:AbortSignal.timeout(90000)});
+  async complete(messages,{signal}={}){
+    const res=await fetch(this.url+'/v1/llm/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages}),redirect:'error',signal:combinedSignal(signal)});
     if(!res.ok)throw Error('Gateway HTTP '+res.status);
     const {text}=await res.json();if(typeof text!=='string'||!text.trim()||text.length>64000)throw Error('Invalid model response');return text.trim();
   }
+  async *stream(messages,{signal}={}){
+    const res=await fetch(this.url+'/v1/llm/stream',{method:'POST',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify({messages}),redirect:'error',signal:combinedSignal(signal)});
+    if(!res.ok)throw Error('Gateway stream HTTP '+res.status);
+    if(!res.body)throw Error('Gateway stream body unavailable');
+    const reader=res.body.getReader(),decoder=new TextDecoder();
+    let buffer='',finished=false;
+    const parseFrame=function*(frame){
+      const data=frame.split(/\r?\n/).filter(line=>line.startsWith('data:')).map(line=>line.slice(5).replace(/^ /,'')).join('\n');
+      if(!data)return;
+      if(data.trim()==='[DONE]'){finished=true;return;}
+      let payload;try{payload=JSON.parse(data);}catch{return;}
+      const delta=payload?.choices?.[0]?.delta?.content;
+      if(typeof delta==='string'&&delta)yield delta;
+    };
+    try{
+      while(!finished){
+        const {value,done}=await reader.read();
+        if(done)break;
+        buffer+=decoder.decode(value,{stream:true});
+        let match;
+        while((match=/\r?\n\r?\n/.exec(buffer))&&!finished){
+          const frame=buffer.slice(0,match.index);
+          buffer=buffer.slice(match.index+match[0].length);
+          yield* parseFrame(frame);
+        }
+      }
+      buffer+=decoder.decode();
+      if(buffer.trim()&&!finished)yield* parseFrame(buffer);
+    }finally{
+      try{reader.releaseLock();}catch{}
+    }
+  }
 }
 const EXPLICIT=/请记住|记住[：:]|帮我记|记下|我想更正一下|更正一下我的|更新我的偏好|更新你对我的理解|请更新我的记忆|remember this|please remember|update my memory/i;
+async function modelText(model,messages,{signal,onToken}={}){
+  if(typeof model.stream==='function'){
+    let answer='';
+    for await(const token of model.stream(messages,{signal})){
+      if(signal?.aborted)throw aborted();
+      answer+=token;onToken?.(token);
+    }
+    return answer.trim();
+  }
+  const answer=await model.complete(messages,{signal});
+  if(signal?.aborted)throw aborted();
+  if(typeof answer==='string')onToken?.(answer);
+  return answer;
+}
 export class Agent{
-  constructor(store,model,{memory=null,understanding=null,growth=null,historyTurns=12}={}){if(!Number.isInteger(historyTurns)||historyTurns<0||historyTurns>12)throw Error('Invalid history window');if([memory,understanding].some(m=>m&&m.store!==store))throw Error('Agent and memory must share store');this.historyTurns=historyTurns;this.store=store;this.model=model;this.memory=memory;this.understanding=understanding;this.growth=growth;this.tail=Promise.resolve();}
-  reply(input,conversationId='default'){
+  constructor(store,model,{memory=null,understanding=null,growth=null,historyTurns=12}={}){
+    if(!Number.isInteger(historyTurns)||historyTurns<0||historyTurns>12)throw Error('Invalid history window');
+    if([memory,understanding].some(m=>m&&m.store!==store))throw Error('Agent and memory must share store');
+    this.historyTurns=historyTurns;this.store=store;this.model=model;this.memory=memory;this.understanding=understanding;this.growth=growth;this.tail=Promise.resolve();
+  }
+  reply(input,conversationId='default',options={}){return this.replyStream(input,conversationId,options);}
+  replyStream(input,conversationId='default',{signal,onToken,requestId=null}={}){
     if(typeof input!=='string'||!input.trim()||input.length>16000)return Promise.reject(Error('Invalid input'));
+    if(requestId!==null&&(typeof requestId!=='string'||!requestId||requestId.length>100))return Promise.reject(Error('Invalid request ID'));
     const text=input.trim();
     const run=this.tail.then(async()=>{
+      if(signal?.aborted)throw aborted();
+      if(requestId){const prior=this.store.requestTurn(requestId);if(prior)return prior;}
       this.store.requireConversation(conversationId);
       if(this.growth){
         const control=this.growth.control(conversationId,text);
         if(control){
-          // Never persist the nonce in transcript or memory inputs.
+          if(signal?.aborted)throw aborted();
           const display=text.startsWith('/confirm')?'确认成长记录变更':'取消成长记录变更';
-          try{return {...this.store.append(display,control.answer,[],conversationId),event:{growth:control.event}};}
+          try{return {...this.store.append(display,control.answer,[],conversationId,requestId),event:{growth:control.event}};}
           catch(e){if(control.event.status==='committed')return {user:display,assistant:'成长记录已保存，但对话日志未能同步写入。',event:{growth:{...control.event,transcript_log_failed:true}}};throw e;}
         }
         this.growth.cancel(conversationId);
@@ -40,14 +100,18 @@ export class Agent{
       let system=SYSTEM_PROMPT,memories=[],claims=[];const errors=[];
       if(this.memory||this.understanding)system+='\n长期记忆和个人理解在回复后异步整理，不要宣称尚未完成的记忆写入已经成功。';
       if(this.memory){try{memories=await this.memory.retrieve(text);if(memories.length)system+='\n'+this.memory.context(memories);}catch{errors.push('memory_retrieve_failed');}}
+      if(signal?.aborted)throw aborted();
       if(this.understanding){try{claims=await this.understanding.retrieve(text);if(claims.length)system+='\n'+this.understanding.context(claims);}catch{errors.push('understanding_retrieve_failed');}}
+      if(signal?.aborted)throw aborted();
       const messages=[{role:'system',content:system},...this.store.history(this.historyTurns,conversationId).flatMap(t=>[{role:'user',content:t.user},{role:'assistant',content:t.assistant}]),{role:'user',content:text}];
-      let answer, growthEvent=null;
-      if(this.growth){const result=await this.growth.complete(messages,conversationId);answer=result.answer;growthEvent=result.event;}else answer=await this.model.complete(messages);
+      let answer,growthEvent=null;
+      if(this.growth){const result=await this.growth.complete(messages,conversationId,{signal,onToken});answer=result.answer;growthEvent=result.event;}
+      else answer=await modelText(this.model,messages,{signal,onToken});
+      if(signal?.aborted)throw aborted();
       if(typeof answer!=='string'||!answer.trim())throw Error('Invalid model response');
       const kinds=[];if(this.memory)kinds.push('long_memory.extract');if(this.understanding)kinds.push({kind:'personal_understanding.process',priority:isUrgent(text)?10:0});
       if(this.memory&&EXPLICIT.test(text))answer=answer.trim()+'\n\n这条记忆已进入后台整理队列，当前尚未确认写入完成。';
-      let turn;try{turn=this.store.append(text,answer.trim(),kinds,conversationId);}catch(e){this.growth?.cancel(conversationId);throw e;}
+      let turn;try{turn=this.store.append(text,answer.trim(),kinds,conversationId,requestId);}catch(e){this.growth?.cancel(conversationId);throw e;}
       let confirmed=[];if(this.understanding){try{confirmed=this.understanding.resolve(turn.id);}catch{errors.push('confirmation_failed');}}
       return {...turn,pending_growth:this.growth?.getPending(conversationId)??null,event:{growth:growthEvent,retrieved_memory_ids:memories.map(m=>m.id),retrieved_claim_ids:claims.map(c=>c.id),confirmed_claim_ids:confirmed,queued_job_ids:this.store.jobs(turn.id).map(j=>j.id),memory_search:this.memory?.lastSearch??null,understanding_search:this.understanding?.lastSearch??null,errors}};
     });

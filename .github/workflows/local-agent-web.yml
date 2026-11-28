@@ -1,7 +1,7 @@
 name: Local agent web tests
 on:
   push:
-    branches: [feat/local-agent-web]
+    branches: [feat/local-agent-web, feat/ai-friend-web-v1]
   workflow_dispatch:
 jobs:
   smoke:
