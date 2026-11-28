@@ -64,7 +64,7 @@ export class Store {
     if(before!==null&&(!Number.isSafeInteger(before)||before<1))throw Error('Invalid cursor');
     const rows=before===null
       ?this.db.prepare('SELECT rowid AS cursor,id,user,assistant,assistant_blocks,created_at,conversation_id FROM turns WHERE conversation_id=? ORDER BY rowid DESC LIMIT ?').all(conversationId,limit+1)
-      :this.db.prepare('SELECT rowid AS cursor,id,user,assistant,created_at,conversation_id FROM turns WHERE conversation_id=? AND rowid<? ORDER BY rowid DESC LIMIT ?').all(conversationId,before,limit+1);
+      :this.db.prepare('SELECT rowid AS cursor,id,user,assistant,assistant_blocks,created_at,conversation_id FROM turns WHERE conversation_id=? AND rowid<? ORDER BY rowid DESC LIMIT ?').all(conversationId,before,limit+1);
     const has_more=rows.length>limit,selected=rows.slice(0,limit).reverse();
     return {turns:selected.map(withBlocks),has_more,before:selected.length?selected[0].cursor:null};
   }
@@ -74,8 +74,8 @@ export class Store {
     const target=this.db.prepare('SELECT rowid AS cursor FROM turns WHERE id=? AND conversation_id=?').get(id,conversationId);
     if(!target)return null;
     const leftCount=Math.floor(limit/2),rightCount=limit-leftCount;
-    const left=this.db.prepare('SELECT rowid AS cursor,id,user,assistant,created_at,conversation_id FROM turns WHERE conversation_id=? AND rowid<=? ORDER BY rowid DESC LIMIT ?').all(conversationId,target.cursor,leftCount);
-    const right=this.db.prepare('SELECT rowid AS cursor,id,user,assistant,created_at,conversation_id FROM turns WHERE conversation_id=? AND rowid>? ORDER BY rowid ASC LIMIT ?').all(conversationId,target.cursor,rightCount);
+    const left=this.db.prepare('SELECT rowid AS cursor,id,user,assistant,assistant_blocks,created_at,conversation_id FROM turns WHERE conversation_id=? AND rowid<=? ORDER BY rowid DESC LIMIT ?').all(conversationId,target.cursor,leftCount);
+    const right=this.db.prepare('SELECT rowid AS cursor,id,user,assistant,assistant_blocks,created_at,conversation_id FROM turns WHERE conversation_id=? AND rowid>? ORDER BY rowid ASC LIMIT ?').all(conversationId,target.cursor,rightCount);
     const oldest=left.at(-1)?.cursor??null,newest=right.at(-1)?.cursor??left[0]?.cursor??null;
     const has_more_before=oldest!==null&&!!this.db.prepare('SELECT 1 FROM turns WHERE conversation_id=? AND rowid<? LIMIT 1').get(conversationId,oldest);
     const has_more_after=newest!==null&&!!this.db.prepare('SELECT 1 FROM turns WHERE conversation_id=? AND rowid>? LIMIT 1').get(conversationId,newest);
