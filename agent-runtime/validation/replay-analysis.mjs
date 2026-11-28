@@ -12,12 +12,12 @@ const sectionPatterns=[
 const isConversationClosure=value=>/^(?:没有了|没有其他(?:补充|想说的)?了?|就这些|没了|到这里|先这样|暂时没有其他补充)[。！!？?]*$/u.test(String(value||'').trim());
 
 export function analyzeReplay(turns){
-  const handbookTurns=turns.filter(turn=>/(?:^|\\n)#\\s*《个人意义设计手册》/.test(turn.assistant||''));
+  const handbookTurns=turns.filter(turn=>/(?:^|\n)#\s*《个人意义设计手册》/.test(turn.assistant||''));
   const handbookTurn=handbookTurns.at(-1)||null;
   const handbook=handbookTurn?.assistant||'';
-  const compact=Array.from(handbook.replace(/\\s/g,'')).length;
+  const compact=Array.from(handbook.replace(/\s/g,'')).length;
   const missingSections=sectionPatterns.filter(([,pattern])=>!pattern.test(handbook)).map(([name])=>name);
-  const tableLines=handbook.split('\\n').filter(line=>/^\\s*\\|.*\\|\\s*$/.test(line));
+  const tableLines=handbook.split('\n').filter(line=>/^\s*\|.*\|\s*$/.test(line));
   const ending=handbook.trim().slice(-500);
   const latestSubstantiveUserTurn=turns.filter(turn=>turn.kind==='replayed_user_turn'&&!isConversationClosure(turn.user)).at(-1)||null;
   const finalTurn=turns.at(-1)||null;
@@ -35,7 +35,7 @@ export function analyzeReplay(turns){
     handbook_turn_index:handbookTurn?.index??null,
     handbook_characters:Array.from(handbook).length,
     handbook_characters_without_whitespace:compact,
-    handbook_section_titles:(handbook.match(/^#{1,3}\\s+.+$/gm)||[]),
+    handbook_section_titles:(handbook.match(/^#{1,3}\s+.+$/gm)||[]),
     handbook_table_lines:tableLines.length,
     handbook_missing_sections:missingSections,
     handbook_ending_excerpt:ending.slice(-180),
