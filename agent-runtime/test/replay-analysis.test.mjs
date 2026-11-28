@@ -15,8 +15,9 @@ const handbook=[
   '| 维度 | 观察 |',
   '|---|---|',
   '| 兴趣 | 创造 |',
+  '| 价值 | 自由 |',
   '意义会在生活中继续展开。'
-].join('\\n')+'意义会在生活中继续展开。'.repeat(500);
+].join('\n')+'意义会在生活中继续展开。'.repeat(500);
 
 test('replay analysis checks the latest handbook rather than the final conversational acknowledgement',()=>{
   const turns=[
@@ -30,9 +31,9 @@ test('replay analysis checks the latest handbook rather than the final conversat
   const result=analyzeReplay(turns);
   assert.equal(result.handbook_turn_index,2);
   assert.ok(result.handbook_characters_without_whitespace>=5000);
-  assert.equal(result.handbook_table_lines,3);
+  assert.equal(result.handbook_table_lines,4);
   assert.equal(result.handbook_missing_sections.length,0);
-  assert.equal(result.final_turn_response_characters,6);
+  assert.equal(result.final_turn_response_characters,7);
   assert.equal(result.final_turn_is_closure,true);
   assert.equal(result.latest_substantive_user_turn_index,4);
   assert.equal(result.checks.personal_meaning_handbook_generated.passed,true);
