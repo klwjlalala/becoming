@@ -28,7 +28,7 @@ class Provider(BaseHTTPRequestHandler):
             self.send_response(200);self.send_header("Content-Type","text/event-stream");self.end_headers()
             chunk=json.dumps({"choices":[{"delta":{"content":text}}]},ensure_ascii=False).encode()
             self.wfile.write(b"data: "+chunk+b"\n\n")
-            self.wfile.write(b"data: [DONE]\\n\\n")
+            self.wfile.write(b"data: [DONE]\n\n")
             return
         body=json.dumps({"choices":[{"message":{"content":text}}]}).encode()
         self.send_response(200);self.send_header("Content-Type","application/json");self.end_headers();self.wfile.write(body)
