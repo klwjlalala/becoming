@@ -145,9 +145,9 @@ export class Agent{
       if(signal?.aborted)throw aborted();
       if(this.understanding){try{claims=await this.understanding.retrieve(text);if(claims.length)system+='\n'+this.understanding.context(claims);}catch{errors.push('understanding_retrieve_failed');}}
       if(signal?.aborted)throw aborted();
-      const omittedSourceIds=new Set(this.store.instructionSourceIds(conversationId));
-      const history=this.store.history(this.historyTurns,conversationId).filter(t=>!omittedSourceIds.has(t.id));
-      const messages=[{role:'system',content:system},...history.flatMap(t=>[{role:'user',content:t.user},{role:'assistant',content:t.assistant}]),{role:'user',content:modelInput}];
+      const instructionSourceIds=new Set(this.store.instructionSourceIds(conversationId));
+      const history=this.store.history(this.historyTurns,conversationId);
+      const messages=[{role:'system',content:system},...history.flatMap(t=>instructionSourceIds.has(t.id)?[{role:'assistant',content:t.assistant}]:[{role:'user',content:t.user},{role:'assistant',content:t.assistant}]),{role:'user',content:modelInput}];
       let answer,growthEvent=null;
       if(this.growth){const result=await this.growth.complete(messages,conversationId,{signal,onToken});answer=result.answer;growthEvent=result.event;}
       else answer=await modelText(this.model,messages,{signal,onToken});
