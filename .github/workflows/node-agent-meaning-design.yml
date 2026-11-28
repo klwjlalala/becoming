@@ -74,7 +74,15 @@ jobs:
           BECOMING_GATEWAY: http://127.0.0.1:8000
           MEANING_DESIGN_MAX_CALLS: ${{ inputs.max_calls || 24 }}
           MEANING_DESIGN_REPORT: artifacts/meaning-design-agent-acceptance.json
-        run: npm --prefix agent-runtime run evaluate:meaning-design
+        run: |
+          npm --prefix agent-runtime run evaluate:meaning-design || status=$?
+          if [[ ${status:-0} -ne 0 ]] && grep -q 'Gateway structured stream HTTP 502' agent-runtime/artifacts/meaning-design-agent-acceptance.json; then
+            echo "Transient gateway 502 detected; retrying the live acceptance once."
+            sleep 5
+            npm --prefix agent-runtime run evaluate:meaning-design
+          else
+            exit ${status:-0}
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
