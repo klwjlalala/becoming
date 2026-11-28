@@ -1,5 +1,6 @@
 """Development-only stateless LLM gateway. The agent lives entirely in Node."""
 import json
+import base64
 import os
 import re
 from typing import Literal
@@ -58,6 +59,10 @@ class Completion(BaseModel):
             if set(self.tool_choice)!={"type","function"} or self.tool_choice.get("type")!="function" or not isinstance(self.tool_choice.get("function"),dict) or set(self.tool_choice["function"])!={"name"}:
                 raise ValueError("Invalid named tool_choice")
         return self
+
+class ImageGenerationRequest(BaseModel):
+    prompt: str = Field(min_length=1,max_length=4000)
+    size: Literal["1024x1024","1024x1536","1536x1024"] = "1024x1024"
 
 @app.get("/health")
 def health(): return {"ok":True}
@@ -135,6 +140,44 @@ def llm_stream(request: Completion):
 
 class EmbeddingRequest(BaseModel):
     texts: list[str] = Field(min_length=1,max_length=32)
+
+@app.post("/v1/llm/images")
+def generate_image(request: ImageGenerationRequest):
+    """Optional OpenAI-compatible image generation proxy; image credentials stay in Python."""
+    try:
+        base=os.environ.get("BECOMING_IMAGE_BASE_URL",os.environ.get("BECOMING_BASE_URL",os.environ.get("BECOMING_MODEL_BASE_URL","https://api.openai.com/v1")))
+        key=os.environ.get("BECOMING_IMAGE_API_KEY") or os.environ.get("BECOMING_API_KEY") or os.environ.get("BECOMING_MODEL_API_KEY")
+        model=os.environ.get("BECOMING_IMAGE_MODEL")
+        parsed=urlparse(base)
+        if not key or not model or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or not (parsed.scheme=="https" or (parsed.scheme=="http" and parsed.hostname in ("localhost","127.0.0.1","::1"))):
+            raise HTTPException(503,"Image generation not configured")
+        payload={"model":model,"prompt":request.prompt,"size":request.size,"n":1}
+        req=Request(base.rstrip("/")+"/images/generations",data=json.dumps(payload).encode(),headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},method="POST")
+        with build_opener(NoRedirect()).open(req,timeout=180) as response:
+            result=json.load(response)
+        rows=result.get("data")
+        if not isinstance(rows,list) or len(rows)!=1 or not isinstance(rows[0],dict) or not isinstance(rows[0].get("b64_json"),str):
+            raise ValueError("Provider must return one base64-encoded image")
+        encoded=rows[0]["b64_json"]
+        if len(encoded)>20000000:
+            raise ValueError("Generated image is too large")
+        raw=base64.b64decode(encoded,validate=True)
+        if not raw or len(raw)>15000000:
+            raise ValueError("Generated image is too large")
+        if raw.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+            mime="image/png"
+        elif raw.startswith(b"\\xff\\xd8\\xff"):
+            mime="image/jpeg"
+        elif len(raw)>12 and raw[:4]==b"RIFF" and raw[8:12]==b"WEBP":
+            mime="image/webp"
+        else:
+            raise ValueError("Unsupported generated image format")
+        return {"image_base64":encoded,"mime_type":mime,"revised_prompt":rows[0].get("revised_prompt")}
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(502,"Upstream image generation failed") from None
+
 
 @app.post("/v1/llm/embeddings")
 def embeddings(request: EmbeddingRequest):
