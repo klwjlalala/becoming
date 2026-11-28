@@ -8,6 +8,7 @@ export class Store {
       INSERT OR IGNORE INTO conversations VALUES('default','长期会话',CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS turns(id TEXT PRIMARY KEY,user TEXT NOT NULL,assistant TEXT NOT NULL,created_at TEXT NOT NULL,conversation_id TEXT NOT NULL DEFAULT 'default' REFERENCES conversations(id) ON DELETE CASCADE);
       CREATE TABLE IF NOT EXISTS conversation_instructions(conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,content TEXT NOT NULL CHECK(length(trim(content))>0 AND length(content)<=16000),source_turn_id TEXT REFERENCES turns(id) ON DELETE SET NULL,version INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS conversation_instruction_sources(conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,source_turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,created_at TEXT NOT NULL,PRIMARY KEY(conversation_id,source_turn_id));
       CREATE TABLE IF NOT EXISTS turn_requests(request_id TEXT PRIMARY KEY,turn_id TEXT NOT NULL UNIQUE REFERENCES turns(id) ON DELETE CASCADE);
       CREATE TABLE IF NOT EXISTS background_jobs(id INTEGER PRIMARY KEY,turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,kind TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,error TEXT,priority INTEGER NOT NULL DEFAULT 0, UNIQUE(turn_id,kind));
       CREATE TABLE IF NOT EXISTS long_memories(id INTEGER PRIMARY KEY AUTOINCREMENT,key TEXT NOT NULL,category TEXT NOT NULL CHECK(category IN ('fact','experience','subjective')),quote TEXT NOT NULL,source_turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)));
@@ -29,6 +30,7 @@ export class Store {
   requireConversation(id){if(typeof id!=='string'||!this.db.prepare('SELECT 1 FROM conversations WHERE id=?').get(id))throw Error('Unknown conversation');}
   getInstructions(conversationId='default'){this.requireConversation(conversationId);return this.db.prepare('SELECT conversation_id,content,source_turn_id,version,created_at,updated_at FROM conversation_instructions WHERE conversation_id=?').get(conversationId)||null;}
   clearInstructions(conversationId='default'){this.requireConversation(conversationId);return this.db.prepare('DELETE FROM conversation_instructions WHERE conversation_id=?').run(conversationId).changes>0;}
+  instructionSourceIds(conversationId='default'){this.requireConversation(conversationId);return this.db.prepare('SELECT source_turn_id FROM conversation_instruction_sources WHERE conversation_id=? ORDER BY created_at,source_turn_id').all(conversationId).map(row=>row.source_turn_id);}
   deleteConversation(id){this.requireConversation(id);return this.transaction(()=>{this.db.prepare('DELETE FROM turns WHERE conversation_id=?').run(id);if(id!=='default')this.db.prepare('DELETE FROM conversations WHERE id=?').run(id);});}
   requestTurn(requestId){if(typeof requestId!=='string'||!requestId)return null;const row=this.db.prepare('SELECT turn_id FROM turn_requests WHERE request_id=?').get(requestId);return row?this.turn(row.turn_id):null;}
   append(user,assistant,kinds=[],conversationId='default',requestId=null,instructionUpdate=null){
@@ -44,6 +46,7 @@ export class Store {
         const time=new Date().toISOString();
         this.db.prepare(`INSERT INTO conversation_instructions(conversation_id,content,source_turn_id,version,created_at,updated_at) VALUES(?,?,?,1,?,?)
           ON CONFLICT(conversation_id) DO UPDATE SET content=excluded.content,source_turn_id=excluded.source_turn_id,version=conversation_instructions.version+1,updated_at=excluded.updated_at`).run(conversationId,content.trim(),t.id,time,time);
+        this.db.prepare('INSERT OR IGNORE INTO conversation_instruction_sources(conversation_id,source_turn_id,created_at) VALUES(?,?,?)').run(conversationId,t.id,time);
       }
       const insert=this.db.prepare('INSERT INTO background_jobs(turn_id,kind,priority) VALUES(?,?,?)');
       for(const spec of kinds)insert.run(t.id,typeof spec==='string'?spec:spec.kind,typeof spec==='string'?0:spec.priority);
