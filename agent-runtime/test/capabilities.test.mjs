@@ -122,6 +122,36 @@ test('native growth tools preserve the existing user-confirmation boundary',asyn
   assert.equal(growthStore.read('list_goals',{}).items.length,1);
   growthStore.close();store.close();
 });
+test('diagram capability validates node references and returns a renderable block',async()=>{
+  const registry=new CapabilityRegistry();
+  registry.register({
+    name:'diagram_create',
+    description:'Create a relationship diagram or process flow from labeled nodes and edges.',
+    category:'visualization',
+    keywords:['关系图','流程图','diagram'],
+    parameters:{
+      type:'object',
+      properties:{
+        title:{type:'string',minLength:1,maxLength:80},
+        layout:{type:'string',enum:['vertical','horizontal']},
+        nodes:{type:'array',minItems:2,maxItems:5,items:{type:'object',properties:{id:{type:'string',minLength:1,maxLength:24},label:{type:'string',minLength:1,maxLength:48},description:{type:'string',maxLength:80}},required:['id','label'],additionalProperties:false}},
+        edges:{type:'array',maxItems:8,items:{type:'object',properties:{from:{type:'string'},to:{type:'string'},label:{type:'string'}},required:['from','to'],additionalProperties:false}}
+      },
+      required:['title','layout','nodes','edges'],
+      additionalProperties:false
+    },
+    handler:args=>{
+      const ids=new Set(args.nodes.map(node=>node.id));
+      if(ids.size!==args.nodes.length||args.edges.some(edge=>!ids.has(edge.from)||!ids.has(edge.to)||edge.from===edge.to))throw Error('Invalid edge reference');
+      return {blocks:[{type:'diagram',title:args.title,layout:args.layout,nodes:args.nodes,edges:args.edges}]};
+    }
+  });
+  const result=await registry.execute('diagram_create',{title:'目标关系',layout:'vertical',nodes:[{id:'a',label:'兴趣'},{id:'b',label:'行动'}],edges:[{from:'a',to:'b',label:'推动'}]});
+  assert.equal(result.ok,true);
+  assert.equal(result.result.blocks[0].type,'diagram');
+  const invalid=await registry.execute('diagram_create',{title:'错误关系',layout:'vertical',nodes:[{id:'a',label:'A'},{id:'b',label:'B'}],edges:[{from:'a',to:'missing'}]});
+  assert.equal(invalid.ok,false);
+});
 test('registry exposes only enabled capabilities to discovery',()=>{
   const registry=chartRegistry();
   registry.register({name:'disabled_tool',description:'Disabled capability',category:'other',keywords:['disabled'],enabled:false,parameters:{type:'object',properties:{},additionalProperties:false},handler:()=>({})});
