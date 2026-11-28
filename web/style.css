@@ -185,3 +185,13 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px soli
 .agent-image-card img{display:block;width:100%;height:auto;max-height:560px;object-fit:contain;border-radius:9px}
 .agent-image-card figcaption{margin-top:8px;color:var(--muted);font-size:11px;line-height:1.5}
 .agent-document-link{display:inline-flex;align-items:center;gap:8px;margin:10px 0;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:var(--surface)}
+
+
+.agent-diagram-card{margin:14px 0;padding:12px;border:1px solid var(--line);border-radius:14px;background:var(--surface-soft);overflow-x:auto}
+.agent-diagram-svg{display:block;width:100%;height:auto;min-width:340px;color:var(--ink)}
+.agent-diagram-edge{stroke:var(--accent);stroke-width:2;opacity:.72}
+.agent-diagram-arrow{fill:var(--accent)}
+.agent-diagram-edge-label{fill:var(--muted);font-size:11px}
+.agent-diagram-node{fill:var(--surface);stroke:var(--accent);stroke-width:1.5}
+.agent-diagram-label{fill:var(--ink);font-size:14px;font-weight:700}
+.agent-diagram-description{fill:var(--muted);font-size:11px}
