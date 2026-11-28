@@ -100,7 +100,6 @@ try{
   const final=handbookTurn?.assistant||'';
   const compactFinal=analysis.handbook_characters_without_whitespace;
   const missingSections=analysis.handbook_missing_sections;
-  const tableLines=final.split('\n').filter(line=>/^\s*\\|.*\\|\s*$/.test(line));
   const ending=analysis.handbook_ending_excerpt;
   const questionMarks=(firstAnswer.match(/[？?]/g)||[]).length;
   const lastModelCall=[...gateway.trace].reverse().find(call=>call.last_user_input===fixture.answers.at(-1));
@@ -127,7 +126,7 @@ try{
   check('final_response_length_5000_to_7000_characters',compactFinal>=5000&&compactFinal<=7000,{characters_without_whitespace:compactFinal});
   check('final_response_covers_all_eight_named_sections',missingSections.length===0,{missing_sections:missingSections});
   check('final_response_has_reflective_closing',ending.length>=100&&/意义|时刻|生活|未来|山|风|树|开始|继续/.test(ending),{ending_excerpt:ending.slice(-180)});
-  check('final_response_uses_markdown_tables',tableLines.length>=4,{table_lines:tableLines.length});
+  check('final_response_uses_markdown_tables',analysis.handbook_table_lines>=4,{table_lines:analysis.handbook_table_lines});
   check('final_response_reflects_fixture_evidence',themeChecks.every(([,passed])=>passed),{themes:themeChecks.map(([name,passed])=>({name,passed}))});
   check('no_tool_execution_failures',report.summary.failed_tools===0,{failed_tools:report.summary.failed_tools});
   check('no_unconfirmed_growth_mutations',report.turns.every(turn=>!turn.pending_growth));
@@ -160,7 +159,7 @@ try{
   report.handbook_analysis=analysis;
   report.final_characters_without_whitespace=compactFinal;
   report.missing_sections=missingSections;
-  report.final_table_lines=tableLines.length;
+  report.final_table_lines=analysis.handbook_table_lines;
   report.final_ending_excerpt=ending.slice(-180);
   report.final_response=final;
   report.summary.model_calls=gateway.calls;
