@@ -48,8 +48,7 @@ capabilities.register({
     return {blocks:[{type:'chart',chartType:args.chart_type,title:args.title,labels:args.labels,values:args.values}]};
   }
 });
-if(process.env.BECOMING_IMAGE_MODEL){
-  capabilities.register({
+capabilities.register({
     name:'image_generate',
     description:'Generate an original image to illustrate a scene, idea or concept. Use when a visual would materially help the user; describe the intended image precisely.',
     category:'visualization',
@@ -70,8 +69,7 @@ if(process.env.BECOMING_IMAGE_MODEL){
       const asset=assetStore.save(generated.buffer,generated.mime_type);
       return {asset_id:asset.id,mime_type:asset.mime_type,blocks:[{type:'image',asset_id:asset.id,alt:args.alt||'AI 生成的辅助图片',caption:args.caption||generated.revised_prompt||''}]};
     }
-  });
-}
+});
 const agent=new Agent(store,gateway,{memory,understanding,growth,capabilities});
 const worker=new BackgroundWorker(store,{'long_memory.extract':id=>{if(!memory)throw Error('Memory disabled');return memory.extract(id);},'personal_understanding.process':id=>{if(!understanding)throw Error('Understanding disabled');return understanding.processTurn(id);}});
 setInterval(()=>{worker.tick().catch(()=>console.error('Background worker tick failed'));},1000).unref();
@@ -115,7 +113,7 @@ createServer(async(req,res)=>{
     if(!/^[0-9a-f-]{36}$/i.test(id))return json(res,400,{error:'Invalid request ID'});
     return json(res,200,{turn:store.requestTurn(id)||null});
   }
-  if(req.method==='GET'&&p==='/api/status'){const instruction=store.getInstructions('default');return json(res,200,{jobs:store.jobCounts(),memoryEnabled:!!memory,conversationId:'default',imageGenerationAvailable:!!process.env.BECOMING_IMAGE_MODEL,sessionInstruction:instruction?{active:true,version:instruction.version,characters:Array.from(instruction.content).length}: {active:false}});}
+  if(req.method==='GET'&&p==='/api/status'){const instruction=store.getInstructions('default');return json(res,200,{jobs:store.jobCounts(),memoryEnabled:!!memory,conversationId:'default',sessionInstruction:instruction?{active:true,version:instruction.version,characters:Array.from(instruction.content).length}: {active:false}});}
   if(req.method==='GET'&&p==='/api/memories')return json(res,200,{memories:memory?.list()||[]});
   if(req.method==='GET'&&p==='/api/understanding')return json(res,200,{claims:understanding?.list()||[]});
   if(req.method==='GET'&&p==='/api/jobs')return json(res,200,{jobs:store.jobs()});
