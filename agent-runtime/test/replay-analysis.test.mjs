@@ -41,18 +41,20 @@ test('replay analysis checks the latest handbook rather than the final conversat
   assert.equal(result.checks.handbook_generated_after_last_substantive_user_turn.passed,false);
   assert.equal(result.checks.handbook_generated_after_closure_signal.passed,false);
   assert.equal(result.checks.handbook_not_prematurely_delivered.passed,false);
+  assert.equal(result.checks.standalone_final_confirmation_was_requested.passed,false);
   assert.equal(result.first_handbook_turn_index,2);
 });
 
 test('replay analysis passes when the handbook follows the final substantive user input',()=>{
   const turns=[
     {index:0,kind:'initial_instruction',assistant:'开始探索'},
-    {index:1,kind:'replayed_user_turn',user:'我的生活目标',assistant:'继续提问'},
+    {index:1,kind:'replayed_user_turn',user:'我的生活目标',assistant:'还有什么想补充或修正的吗？'},
     {index:2,kind:'replayed_user_turn',user:'没有了',assistant:handbook}
   ];
   const result=analyzeReplay(turns);
   assert.equal(result.checks.handbook_generated_after_last_substantive_user_turn.passed,true);
   assert.equal(result.checks.handbook_generated_after_closure_signal.passed,true);
   assert.equal(result.checks.handbook_not_prematurely_delivered.passed,true);
+  assert.equal(result.checks.standalone_final_confirmation_was_requested.passed,true);
   assert.equal(result.final_turn_is_closure,true);
 });
