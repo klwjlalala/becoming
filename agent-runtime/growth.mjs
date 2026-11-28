@@ -89,6 +89,33 @@ export class GrowthTools{
  constructor(model,store){this.model=model;this.store=store;this.pending=new Map();}
  cancel(id){return this.pending.delete(id);}
  getPending(id){const p=this.pending.get(id);return p?{token:p.token,preview:p.preview}:null;}
+ toolDefinitions(){
+  const id={type:'integer',minimum:1,maximum:2147483647},offset={type:'integer',minimum:0,maximum:2147483647},text={type:'string',minLength:1,maxLength:2000};
+  const make=(name,description,properties,required=[])=>({name,description,category:'growth',keywords:['成长','目标','行动','复盘','记录','growth'],parameters:{type:'object',properties,required,additionalProperties:false}});
+  return [
+   make('list_goals','Read the current list of growth goals. Use only when the user asks to inspect existing goals.',{offset}),
+   make('get_goal','Read one existing goal and its actions and reflections. The goal ID must come from a real query or the user.',{goal_id:id,offset},['goal_id']),
+   make('create_goal','Propose a new growth goal. The user must confirm before it is saved.',{text},['text']),
+   make('create_action','Propose an action under an existing goal. The user must confirm before it is saved.',{goal_id:id,text},['goal_id','text']),
+   make('record_reflection','Propose a reflection under an existing goal. The user must confirm before it is saved.',{goal_id:id,text},['goal_id','text']),
+   make('update_item','Propose an update to an existing goal, action or reflection. The user must confirm before it is saved.',{id,text,status:{type:'string',enum:['active','paused','completed','pending','done','skipped'] }},['id']),
+   make('delete_item','Propose deletion of an existing goal, action or reflection. Deleting a goal also deletes its children. The user must confirm before it is saved.',{id},['id'])
+  ];
+ }
+ registerCapabilities(registry){
+  for(const definition of this.toolDefinitions()){
+   registry.register({...definition,handler:(args,context)=>this.executeNative(definition.name,args,context.conversationId)});
+  }
+  return registry;
+ }
+ executeNative(tool,args,conversationId='default'){
+  args=validate(tool,args);
+  if(READ.has(tool))return {status:'read',result:this.store.read(tool,args)};
+  if(this.pending.has(conversationId))return {status:'rejected',error:'A change is already awaiting confirmation'};
+  const preview=this.store.prepare(tool,args),token=randomBytes(4).toString('hex');
+  this.pending.set(conversationId,{token,preview});
+  return {status:'proposed',requires_confirmation:true,token,preview};
+ }
  control(id,input){
   if(input==='/cancel')return this.cancel(id)?{answer:'已取消待确认变更。',event:{status:'cancelled'}}:{answer:'当前没有待确认变更。',event:{status:'no_pending'}};
   if(input!=='/confirm'&&!input.startsWith('/confirm '))return null;
