@@ -146,7 +146,8 @@ export async function runCapabilityLoop(model,messages,registry,{signal,onToken,
       if(totalCalls>maxCalls)throw Error('Capability tool-call limit reached');
       const name=call.function.name;
       let execution;
-      try{execution=await registry.execute(name,call.function.arguments,{signal,conversationId,round,callId:call.id});}
+      if(!active.has(name))execution={ok:false,error:'capability_not_activated'};
+      else try{execution=await registry.execute(name,call.function.arguments,{signal,conversationId,round,callId:call.id});}
       catch(error){execution={ok:false,error:'capability_execution_failed'};}
       const result=execution.result;
       if(Array.isArray(result?.activate))for(const item of result.activate)if(registry.has(item))active.add(item);
