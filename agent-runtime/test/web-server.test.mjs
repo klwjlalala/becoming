@@ -30,8 +30,8 @@ test('Web shell serves one long conversation with streamed chat and idempotent r
     gatewayCalls.count++;
     res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-cache'});
     const chunks=['你好，','这里是测试回复。'];
-    for(const content of chunks)res.write('data: '+JSON.stringify({choices:[{delta:{content}}]})+'\\n\\n');
-    res.end('data: [DONE]\\n\\n');
+    for(const content of chunks)res.write('data: '+JSON.stringify({choices:[{delta:{content}}]})+'\n\n');
+    res.end('data: [DONE]\n\n');
   });
   await new Promise(resolve=>gateway.listen(0,'127.0.0.1',resolve));
   const gatewayPort=gateway.address().port,port=await freePort();
