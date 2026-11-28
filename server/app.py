@@ -82,7 +82,7 @@ def llm(request: Completion):
         if request.tools is not None: payload["tools"]=request.tools
         if request.tool_choice is not None: payload["tool_choice"]=request.tool_choice
         req=Request(base.rstrip("/")+"/chat/completions",data=json.dumps(payload).encode(),headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},method="POST")
-        with build_opener(NoRedirect()).open(req,timeout=90) as response:
+        with build_opener(NoRedirect()).open(req,timeout=180) as response:
             result=json.load(response)
         choice=result["choices"][0]
         message=choice["message"]
@@ -119,7 +119,7 @@ def llm_stream(request: Completion):
         if request.tools is not None: payload["tools"]=request.tools
         if request.tool_choice is not None: payload["tool_choice"]=request.tool_choice
         req=Request(base.rstrip("/")+"/chat/completions",data=json.dumps(payload).encode(),headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","Accept":"text/event-stream"},method="POST")
-        upstream=build_opener(NoRedirect()).open(req,timeout=90)
+        upstream=build_opener(NoRedirect()).open(req,timeout=180)
         if upstream.headers.get_content_type()!="text/event-stream":
             upstream.close()
             raise HTTPException(502,"Upstream did not return an SSE stream")
