@@ -164,9 +164,9 @@ def generate_image(request: ImageGenerationRequest):
         raw=base64.b64decode(encoded,validate=True)
         if not raw or len(raw)>15000000:
             raise ValueError("Generated image is too large")
-        if raw.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+        if raw.startswith(b"\x89PNG\r\n\x1a\n"):
             mime="image/png"
-        elif raw.startswith(b"\\xff\\xd8\\xff"):
+        elif raw.startswith(b"\xff\xd8\xff"):
             mime="image/jpeg"
         elif len(raw)>12 and raw[:4]==b"RIFF" and raw[8:12]==b"WEBP":
             mime="image/webp"
