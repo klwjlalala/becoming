@@ -13,6 +13,7 @@ const isConversationClosure=value=>/^(?:没有了|没有其他(?:补充|想说�
 
 export function analyzeReplay(turns){
   const handbookTurns=turns.filter(turn=>/(?:^|\n)#\s*《个人意义设计手册》/.test(turn.assistant||''));
+  const firstHandbookTurn=handbookTurns[0]||null;
   const handbookTurn=handbookTurns.at(-1)||null;
   const handbook=handbookTurn?.assistant||'';
   const compact=Array.from(handbook.replace(/\s/g,'')).length;
@@ -29,10 +30,13 @@ export function analyzeReplay(turns){
     handbook_covers_all_eight_named_sections:{passed:missingSections.length===0,detail:{missing_sections:missingSections}},
     handbook_has_reflective_closing:{passed:ending.length>=100&&/意义|时刻|生活|未来|山|风|树|开始|继续/.test(ending),detail:{ending_excerpt:ending.slice(-180)}},
     handbook_uses_markdown_tables:{passed:tableLines.length>=4,detail:{table_lines:tableLines.length}},
-    handbook_generated_after_last_substantive_user_turn:{passed:artifactAfterLatestInput,detail:{handbook_turn_index:handbookTurn?.index??null,latest_substantive_user_turn_index:latestSubstantiveUserTurn?.index??null,final_turn_index:finalTurn?.index??null}}
+    handbook_generated_after_last_substantive_user_turn:{passed:artifactAfterLatestInput,detail:{handbook_turn_index:handbookTurn?.index??null,latest_substantive_user_turn_index:latestSubstantiveUserTurn?.index??null,final_turn_index:finalTurn?.index??null}},
+    handbook_generated_after_closure_signal:{passed:!finalTurn||!isConversationClosure(finalTurn.user)||handbookTurn?.index===finalTurn.index,detail:{first_handbook_turn_index:firstHandbookTurn?.index??null,latest_handbook_turn_index:handbookTurn?.index??null,final_turn_index:finalTurn?.index??null,final_turn_is_closure:isConversationClosure(finalTurn?.user)}}
   };
   return {
     handbook_turn_index:handbookTurn?.index??null,
+    first_handbook_turn_index:firstHandbookTurn?.index??null,
+    handbook_turn_indices:handbookTurns.map(turn=>turn.index),
     handbook_characters:Array.from(handbook).length,
     handbook_characters_without_whitespace:compact,
     handbook_section_titles:(handbook.match(/^#{1,3}\s+.+$/gm)||[]),
