@@ -40,20 +40,20 @@ jobs:
         run: npm --prefix agent-runtime test
       - name: Verify model secrets
         env:
-          BECOMING_BASE_URL: \${{ secrets.BECOMING_BASE_URL }}
-          BECOMING_API_KEY: \${{ secrets.BECOMING_API_KEY }}
-          BECOMING_MODEL: \${{ secrets.BECOMING_MODEL }}
+          BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
+          BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
+          BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
         shell: bash
         run: |
           set -euo pipefail
           for key in BECOMING_BASE_URL BECOMING_API_KEY BECOMING_MODEL; do
-            if [[ -z "\${!key}" ]]; then echo "::error::Missing repository secret: $key"; exit 1; fi
+            if [[ -z "${!key}" ]]; then echo "::error::Missing repository secret: $key"; exit 1; fi
           done
       - name: Start model gateway
         env:
-          BECOMING_BASE_URL: \${{ secrets.BECOMING_BASE_URL }}
-          BECOMING_API_KEY: \${{ secrets.BECOMING_API_KEY }}
-          BECOMING_MODEL: \${{ secrets.BECOMING_MODEL }}
+          BECOMING_BASE_URL: ${{ secrets.BECOMING_BASE_URL }}
+          BECOMING_API_KEY: ${{ secrets.BECOMING_API_KEY }}
+          BECOMING_MODEL: ${{ secrets.BECOMING_MODEL }}
         run: |
           python -m uvicorn server.app:app --host 127.0.0.1 --port 8000 >/tmp/becoming-gateway.log 2>&1 &
           echo $! > /tmp/becoming-gateway.pid
@@ -66,7 +66,7 @@ jobs:
       - name: Run multi-turn meaning-design acceptance
         env:
           BECOMING_GATEWAY: http://127.0.0.1:8000
-          MEANING_DESIGN_MAX_CALLS: \${{ inputs.max_calls || 24 }}
+          MEANING_DESIGN_MAX_CALLS: ${{ inputs.max_calls || 24 }}
           MEANING_DESIGN_REPORT: agent-runtime/artifacts/meaning-design-agent-acceptance.json
         run: npm --prefix agent-runtime run evaluate:meaning-design
       - uses: actions/upload-artifact@v4
