@@ -27,6 +27,6 @@ jobs:
         with:
           node-version: '22'
       - name: Check Node server and browser JavaScript syntax
-        run: node --check agent-runtime/server.mjs && node --check web/app.js && node --check agent-runtime/validation/replay-html.mjs && node --check agent-runtime/validation/html-replay-parser.mjs
+        run: node --check agent-runtime/server.mjs && node --check web/app.js && node --check agent-runtime/validation/replay-html.mjs && node --check agent-runtime/validation/html-replay-parser.mjs && node --check agent-runtime/validation/meaning-design-acceptance.mjs
       - name: Run Node agent tests
         run: npm --prefix agent-runtime test

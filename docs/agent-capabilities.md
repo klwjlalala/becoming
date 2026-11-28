@@ -80,3 +80,17 @@ node agent-runtime/validation/replay-html.mjs /path/to/人生意义探索_完整
 - 图片生成默认关闭，避免意外产生图像费用；确认已配置图像模型后，可设置 `BECOMING_ENABLE_IMAGE_GENERATION=1` 开启。
 - 这是原始用户发言顺序回放，不会把旧助手提问和回答复制进新会话；若新 Agent 的提问顺序不同，部分回答可能与它当轮问题不完全对应。
 - 模型调用会产生正常 API 用量；启用图像生成还可能产生额外图像费用。
+
+## 真实模型任务验收：人生意义设计
+
+`agent-runtime/validation/meaning-design-acceptance.mjs` 使用虚构的 12 轮对话，验证通用 Agent 能否在会话级指令持续生效的前提下，完成分阶段探索并生成结构完整的《个人意义设计手册》。该用例接入动态能力注册，但默认关闭图像生成，避免测试意外产生图像费用。
+
+本地运行：
+
+```bash
+BECOMING_GATEWAY=http://127.0.0.1:8000 npm --prefix agent-runtime run evaluate:meaning-design
+```
+
+验收报告会检查首轮提问节奏、12 轮回答保留、长提示词跨历史窗口持续生效、最终手册的九个部分、篇幅、表格、虚构对话中的关键证据覆盖，以及工具调用失败情况。它不强制生成图片、图表或关系图；这些能力分别由独立工具调用测试验证。
+
+真实个人 HTML 的回放仍使用 `agent-runtime/validation/replay-html.mjs` 在本地执行。不要将个人对话 HTML 提交到仓库或作为 CI artifact 上传。
